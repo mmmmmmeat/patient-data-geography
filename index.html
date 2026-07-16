@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Burn Geography Explorer</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
+    <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+    <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="eyebrow">Burn Geography</div>
+          <h1>Web Map Explorer</h1>
+          <p>
+            DA-level burn outcomes and SDOH layers with interactive polygons, switching metrics, and area details.
+          </p>
+        </div>
+
+        <section class="panel">
+          <h2>Layer Mode</h2>
+          <div class="button-row">
+            <button class="pill active" data-mode="sdoh">SDOH</button>
+            <button class="pill" data-mode="outcome">Outcomes</button>
+            <button class="pill" data-mode="combined">Combined</button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>Metric</h2>
+          <select id="metricSelect"></select>
+          <div class="legend" id="legend"></div>
+        </section>
+
+        <section class="panel">
+          <h2>Sex</h2>
+          <div class="button-row">
+            <button class="pill active" data-sex="total">Total</button>
+            <button class="pill" data-sex="m">Male</button>
+            <button class="pill" data-sex="f">Female</button>
+          </div>
+        </section>
+
+        <section class="panel stats">
+          <h2>Selected Area</h2>
+          <div class="stat-grid">
+            <div>
+              <div class="label">DAUID</div>
+              <div id="daid" class="value">-</div>
+            </div>
+            <div>
+              <div class="label">CSD</div>
+              <div id="csdName" class="value">-</div>
+            </div>
+            <div>
+              <div class="label">Incidents</div>
+              <div id="incidents" class="value">-</div>
+            </div>
+            <div>
+              <div class="label">Average age</div>
+              <div id="avgAge" class="value">-</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>Quick Summary</h2>
+          <div id="summaryList" class="summary-list"></div>
+        </section>
+      </aside>
+
+      <main class="map-wrap">
+        <div id="map"></div>
+        <div class="map-hint">Click a DA to inspect its burn profile and SDOH scores.</div>
+      </main>
+    </div>
+
+    <script src="./config.js"></script>
+    <script src="./app.js"></script>
+  </body>
+  </html>
