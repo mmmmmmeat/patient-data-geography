@@ -22,7 +22,7 @@
           <div class="eyebrow">Burn Geography</div>
           <h1>Web Map Explorer</h1>
           <p>
-            DA-level burn outcomes and SDOH layers with interactive polygons, switching metrics, and area details.
+            Area-level burn outcomes and SDOH layers with interactive polygons, switching metrics, and area details.
           </p>
         </div>
 
@@ -57,8 +57,8 @@
               <div class="label">DAUID</div>
               <div id="daid" class="value">-</div>
             </div>
-            <div>
-              <div class="label">CSD</div>
+            <div id="csdNameWrap" style="display: none;">
+              <div class="label">CSD name</div>
               <div id="csdName" class="value">-</div>
             </div>
             <div>
@@ -68,6 +68,10 @@
             <div>
               <div class="label">Average age</div>
               <div id="avgAge" class="value">-</div>
+            </div>
+            <div>
+              <div class="label">Feature id</div>
+              <div id="featureId" class="value">-</div>
             </div>
           </div>
         </section>
@@ -80,7 +84,7 @@
 
       <main class="map-wrap">
         <div id="map"></div>
-        <div class="map-hint">Click a DA to inspect its burn profile and SDOH scores.</div>
+        <div class="map-hint">Click an area to inspect its burn profile and SDOH scores.</div>
       </main>
     </div>
 

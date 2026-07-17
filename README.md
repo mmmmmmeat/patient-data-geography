@@ -46,6 +46,12 @@ It then writes a JSON config into `data processing/configs/` for that dataset.
 - The province list is based on Canadian provinces and territories, since the workflow is intended to stay Canada-only.
 - The current setup script also looks at `C:\Users\sawye\Downloads\map links.csv` for province/area-type map download links.
 
+## Dependencies
+
+- Python is required to run the setup and data processing scripts.
+- Node.js is required only if you want the optional `npx onedrive-link` helper to resolve SharePoint/OneDrive download links automatically.
+- If you are not using the OneDrive helper, Node.js is optional.
+
 ## Installing GDAL
 
 ### Windows

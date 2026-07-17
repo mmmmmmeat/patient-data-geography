@@ -1,5 +1,5 @@
 window.BURN_APP_CONFIG = {
-  tilesUrl: "./xyz/{z}/{x}/{y}.pbf",
+  tilesRoot: "./data processing/map/map data",
   tileSourceLayer: "Single parts",
   currentConfigPointer: "./data processing/configs/current_config.json",
 };
