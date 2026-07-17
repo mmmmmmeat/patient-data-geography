@@ -44,6 +44,7 @@ class NumericOutcome:
 @dataclass
 class DatasetConfig:
     dataset_name: str
+    map_data_name: str
     patient_data_file: str
     pccf_file: str
     provinces: list[str]
@@ -105,7 +106,12 @@ def prompt_provinces() -> list[str]:
         if invalid:
             print(f"Invalid province codes: {', '.join(sorted(set(invalid)))}")
             continue
-        return sorted(set(tokens), key=PROVINCES.index)
+        return sorted(set(tokens))
+
+
+def build_map_data_name(provinces: list[str], map_area_type: str) -> str:
+    province_key = "".join(sorted(provinces))
+    return f"{province_key}_{map_area_type.upper()}"
 
 
 def prompt_map_area_type() -> str:
@@ -193,6 +199,28 @@ def download_file(url: str, destination: Path) -> None:
             for chunk in response.iter_content(chunk_size=1024 * 1024):
                 if chunk:
                     target.write(chunk)
+
+
+def resolve_onedrive_link(url: str) -> str:
+    url = url.strip()
+    lowered = url.lower()
+    if "sharepoint.com" not in lowered and "onedrive.live.com" not in lowered:
+        return url
+
+    try:
+        completed = subprocess.run(
+            ["npx", "onedrive-link", url],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError:
+        return url
+    except subprocess.CalledProcessError:
+        return url
+
+    resolved = completed.stdout.strip()
+    return resolved or url
 
 
 def unzip_archive(archive_path: Path, destination_dir: Path) -> None:
@@ -313,6 +341,7 @@ def create_new_config() -> Path:
     pccf_file = prompt_existing_file(DATA_PROCESSING_DIR / "PCCF", "Name of pccf: ")
     provinces = prompt_provinces()
     map_area_type = prompt_map_area_type()
+    map_data_name = build_map_data_name(provinces, map_area_type)
 
     print()
     print("Base patient columns")
@@ -325,6 +354,7 @@ def create_new_config() -> Path:
 
     config = DatasetConfig(
         dataset_name=dataset_name,
+        map_data_name=map_data_name,
         patient_data_file=str(DATA_PROCESSING_DIR / "patient data" / patient_data_file),
         pccf_file=str(DATA_PROCESSING_DIR / "PCCF" / pccf_file),
         provinces=provinces,
@@ -342,6 +372,7 @@ def create_new_config() -> Path:
     write_json(config_path, asdict(config))
     set_current_config(config_path)
     print(f"Saved config to: {config_path}")
+    print(f"Map data folder key: {map_data_name}")
     return config_path
 
 
@@ -373,7 +404,7 @@ def run_selected_config(config_path: Path) -> None:
             with tempfile.TemporaryDirectory() as tmpdir:
                 tmp_archive = Path(tmpdir) / "filtered_census.zip"
                 print("Downloading pre-filtered census data...")
-                download_file(stats_link_url, tmp_archive)
+                download_file(resolve_onedrive_link(stats_link_url), tmp_archive)
                 print("Unzipping pre-filtered census data...")
                 unzip_archive(tmp_archive, CENSUS_FILTERED_PATH.parent)
         else:

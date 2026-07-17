@@ -151,6 +151,7 @@ def load_weighted_pccf(pccf_path: Path) -> pd.DataFrame:
         df[PCCF_FSA_COL] = df[PCCF_FSA_COL].astype(str).str.strip().str.upper().str[:3]
     if PCCF_CITY_COL in df.columns:
         df[PCCF_CITY_COL] = df[PCCF_CITY_COL].astype(str).str.strip()
+        df = df.rename(columns={PCCF_CITY_COL: "csd_name"})
     df[PCCF_WEIGHT_COL] = pd.to_numeric(df[PCCF_WEIGHT_COL], errors="coerce")
     df = df.dropna(subset=[PCCF_DAUID_COL, PCCF_WEIGHT_COL])
     df = df[df[PCCF_WEIGHT_COL] > 0].copy()
@@ -446,12 +447,9 @@ def main() -> None:
         sdoh_raw = load_prairies_characteristics(set(base[geo_col].astype(str)))
         equiv = load_equivalence_scores()
         quint = load_prairies_quintiles()
-        base = base.merge(sdoh_raw, left_on=geo_col, right_on=PCCF_DAUID_COL, how="left")
-        base = base.drop(columns=[PCCF_DAUID_COL], errors="ignore")
-        base = base.merge(equiv, left_on=geo_col, right_on=PCCF_DAUID_COL, how="left", suffixes=("", "_equiv"))
-        base = base.drop(columns=[PCCF_DAUID_COL], errors="ignore")
-        base = base.merge(quint, left_on=geo_col, right_on=PCCF_DAUID_COL, how="left", suffixes=("", "_quint"))
-        base = base.drop(columns=[PCCF_DAUID_COL], errors="ignore")
+        base = base.merge(sdoh_raw, on=geo_col, how="left")
+        base = base.merge(equiv, on=geo_col, how="left", suffixes=("", "_equiv"))
+        base = base.merge(quint, on=geo_col, how="left", suffixes=("", "_quint"))
     else:
         base["dep_mat"] = np.nan
         base["dep_soc"] = np.nan
