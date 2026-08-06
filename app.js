@@ -9,6 +9,8 @@ const STATE = {
   dataByDauid: new Map(),
   loadedTiles: false,
   mapAreaType: "da",
+  privacyMinIncidents: 0,
+  geoColumn: "DAUID",
 };
 
 const BASE_SDoh_METRICS = [
@@ -92,6 +94,10 @@ function getAllMetricKeys() {
   ]);
 }
 
+function isOutcomeMetric(metric) {
+  return metric === "incidents_total" || metric.endsWith("_total") || metric.endsWith("_m") || metric.endsWith("_f");
+}
+
 function logMap(msg, extra) {
   if (extra !== undefined) console.log(`[map] ${msg}`, extra);
   else console.log(`[map] ${msg}`);
@@ -105,7 +111,7 @@ function buildMap() {
       sources: {
         tiles: {
           type: "vector",
-          promoteId: "DAUID",
+          promoteId: STATE.geoColumn,
           tiles: [TILE_URL],
           minzoom: 0,
           maxzoom: 14,
@@ -140,10 +146,13 @@ function buildMap() {
 async function loadData() {
   const csv = await fetch(CSV_URL).then((r) => r.text());
   const parsed = Papa.parse(csv, { header: true, skipEmptyLines: true });
+  logMap("CSV headers", parsed.meta?.fields || []);
   parsed.data.forEach((row) => {
-    if (!row.DAUID) return;
-    STATE.dataByDauid.set(String(row.DAUID).trim(), row);
+    const geoValue = String(row[STATE.geoColumn] ?? row[STATE.geoColumn.toUpperCase()] ?? row[STATE.geoColumn.toLowerCase()] ?? "").trim();
+    if (!geoValue) return;
+    STATE.dataByDauid.set(geoValue, row);
   });
+  logMap("Loaded geography keys", Array.from(STATE.dataByDauid.keys()).slice(0, 5));
 }
 
 function pickMetric() {
@@ -158,6 +167,27 @@ function pickMetric() {
 
 function colorExpression(metric) {
   const palette = COLOR_RANGES[STATE.mode];
+  if (STATE.mode === "outcome" && STATE.privacyMinIncidents > 0) {
+    const valuesWhenAllowed = [];
+    for (const row of STATE.dataByDauid.values()) {
+      if (Number(row.incidents_total) < STATE.privacyMinIncidents) continue;
+      const metricValue = Number(row[metricColumn(metric)]);
+      if (Number.isFinite(metricValue)) valuesWhenAllowed.push(metricValue);
+    }
+    if (valuesWhenAllowed.length === 0) return NO_DATA_COLOR;
+    const min = Math.min(...valuesWhenAllowed);
+    const max = Math.max(...valuesWhenAllowed);
+    const range = max - min || 1;
+    const stops = palette.map((color, index) => [min + (range * index) / (palette.length - 1), color]);
+    return [
+      "case",
+      ["<", ["to-number", ["feature-state", "incidents_total"]], STATE.privacyMinIncidents],
+      NO_DATA_COLOR,
+      ["!", ["boolean", ["feature-state", "has_value"], false]],
+      NO_DATA_COLOR,
+      ["interpolate", ["linear"], ["coalesce", ["to-number", ["feature-state", metric]], min], ...stops.flat()],
+    ];
+  }
   const values = [];
   for (const row of STATE.dataByDauid.values()) {
     const metricValue = Number(row[metricColumn(metric)]);
@@ -183,6 +213,14 @@ function updateFeatureState() {
     for (const metric of getAllMetricKeys()) {
       const value = Number(row[metricColumn(metric)]);
       if (Number.isFinite(value)) state[metric] = value;
+    }
+    state.incidents_total = Number.isFinite(Number(row.incidents_total)) ? Number(row.incidents_total) : state.incidents_total;
+    if (STATE.privacyMinIncidents > 0 && Number(row.incidents_total) < STATE.privacyMinIncidents) {
+      for (const metric of Object.keys(state)) {
+        if (metric !== "incidents_total" && metric !== "avg_age" && !metric.endsWith("_score")) {
+          delete state[metric];
+        }
+      }
     }
     state.has_value = Object.keys(state).length > 0;
     map.setFeatureState({ source: "tiles", sourceLayer: CONFIG.tileSourceLayer, id: dauid }, state);
@@ -226,7 +264,11 @@ function setSelected(dauid) {
       csdValue.textContent = "-";
     }
   }
-  document.getElementById("incidents").textContent = formatValue(row[metricColumn("incidents_total")]);
+  const incidentsValue = formatValue(row[metricColumn("incidents_total")]);
+  const suppressed = STATE.privacyMinIncidents > 0 && Number(row.incidents_total) < STATE.privacyMinIncidents;
+  document.getElementById("incidents").textContent = suppressed
+    ? `${incidentsValue} (suppressed)`
+    : incidentsValue;
   document.getElementById("avgAge").textContent = formatValue(row.avg_age);
   document.getElementById("featureId").textContent = dauid ?? "-";
 
@@ -284,10 +326,22 @@ async function loadCurrentConfig() {
   const configStem = configPath.split(/[/\\]/).pop().replace(/\.json$/i, "");
   const selectedConfigUrl = new URL(`./data processing/configs/${configStem}.json`, window.location.href).href;
   const selectedConfig = await fetch(selectedConfigUrl).then((r) => r.json());
+  logMap("Current config pointer", currentConfig);
+  logMap("Selected config stem", configStem);
   STATE.mapAreaType = String(selectedConfig.map_area_type || "da").trim().toLowerCase();
+  STATE.privacyMinIncidents = Number(selectedConfig.privacy_min_incidents || 0) || 0;
+  STATE.geoColumn = "DAUID";
   const mapDataName = selectedConfig.map_data_name || buildMapDataName(selectedConfig.provinces, selectedConfig.map_area_type);
   TILE_URL = `${new URL(`./data processing/map/map data/${mapDataName}/`, window.location.href).href}{z}/{x}/{y}.pbf`;
   CSV_URL = new URL(`./data processing/map/merged data/${selectedConfig.dataset_name || configStem}.csv`, window.location.href).href;
+  logMap("Resolved map inputs", {
+    mapAreaType: STATE.mapAreaType,
+    geoColumn: STATE.geoColumn,
+    mapDataName,
+    tileSourceLayer: CONFIG.tileSourceLayer,
+    tileUrl: TILE_URL,
+    csvUrl: CSV_URL,
+  });
   METRICS = {
     sdoh: [...BASE_SDoh_METRICS],
     outcome: getOutcomeMetricsFromConfig(selectedConfig),
@@ -302,7 +356,7 @@ function initMapListeners() {
   map.on("mousemove", "burn-fill", (e) => {
     const f = e.features?.[0];
     if (!f) return;
-    const dauid = String(f.properties.DAUID || f.properties.dauid || "");
+    const dauid = getFeatureGeoId(f.properties);
     map.getCanvas().style.cursor = "pointer";
     setSelected(dauid);
   });
@@ -314,7 +368,7 @@ function initMapListeners() {
   map.on("click", "burn-fill", (e) => {
     const f = e.features?.[0];
     if (!f) return;
-    const dauid = String(f.properties.DAUID || f.properties.dauid || "");
+    const dauid = getFeatureGeoId(f.properties);
     setSelected(dauid);
   });
 
@@ -331,6 +385,28 @@ function initMapListeners() {
   map.on("error", (e) => {
     logMap("error", e?.error ?? e);
   });
+}
+
+function getFeatureGeoId(properties) {
+  if (!properties) return "";
+  const candidates = [
+    STATE.geoColumn,
+    STATE.geoColumn.toUpperCase(),
+    STATE.geoColumn.toLowerCase(),
+    "DAUID",
+    "dauid",
+    "CSDuid",
+    "csduid",
+    "FSA",
+    "fsa",
+  ];
+  for (const key of candidates) {
+    if (Object.prototype.hasOwnProperty.call(properties, key)) {
+      const value = String(properties[key] ?? "").trim();
+      if (value) return value;
+    }
+  }
+  return "";
 }
 
 async function main() {
