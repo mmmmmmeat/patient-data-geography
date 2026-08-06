@@ -43,6 +43,14 @@ def from_repo_path(value: str | Path | None) -> Path:
     return (DATA_PROCESSING_DIR.parent / path).resolve()
 
 
+def raw_pccf_candidate(path: Path) -> Path:
+    if path.name.lower().endswith(" weighted.xlsx"):
+        return path.with_name(path.name[:-len(" weighted.xlsx")] + ".xlsx")
+    if path.stem.lower().endswith(" weighted"):
+        return path.with_name(f"{path.stem[:-9]}{path.suffix}")
+    return path
+
+
 def load_current_config() -> dict:
     if len(sys.argv) > 1:
         config_path = Path(sys.argv[1])
@@ -152,6 +160,10 @@ def main() -> None:
         pccf_path = DATA_PROCESSING_DIR / "PCCF" / pccf_name
     else:
         pccf_path = from_repo_path(config["pccf_file"])
+    if not pccf_path.exists():
+        raw_candidate = raw_pccf_candidate(pccf_path)
+        if raw_candidate.exists():
+            pccf_path = raw_candidate
     if pccf_path.with_name(f"{pccf_path.stem} weighted{pccf_path.suffix}").exists():
         print(f"Weighted PCCF already exists for {pccf_path.name}. Skipping weighting.")
         return
