@@ -1,7 +1,0 @@
-Age,Sex,City,Postal_Code,Regional_Health_Authority,Province,Length_of_stay,TBSA_final,ICU,Outcome_graft,Outcome_full recovery
-44.7,F,WINNIPEG,R2C 0J1,Winnipeg,MB,4,10,,Yes,No
-42.5,M,AUSTIN,R0H 0C0,Southern,MB,8,1,,Yes,Yes
-16.9,F,ISLAND LAKE,R0B 0T0,Northern,MB,13,6,,Yes,Yes
-45.7,M,WINNIPEG,R3T 1Y9,Winnipeg,MB,5,0.5,,Yes,No
-24.3,M,MOOSE LAKE,R0B 0Y0,Northern,MB,13,8,,Yes,Yes
-63.6,M,WINNIPEG,R2K 3W6,Winnipeg,MB,2,5.5,,Yes,Yes
