@@ -271,6 +271,7 @@ def download_file(url: str, destination: Path) -> None:
         },
         stream=True,
         timeout=120,
+        allow_redirects=True,
     ) as response:
         response.raise_for_status()
         with destination.open("wb") as target:
