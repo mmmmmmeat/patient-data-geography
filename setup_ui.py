@@ -241,7 +241,13 @@ def load_keyed_links(path: Path) -> dict[str, str]:
 
 def download_file(url: str, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
-    with requests.get(url.strip(), stream=True, timeout=120, headers={"User-Agent": "Mozilla/5.0"}) as response:
+    with requests.get(
+        url.strip(),
+        stream=True,
+        timeout=120,
+        allow_redirects=True,
+        headers={"User-Agent": "Mozilla/5.0"},
+    ) as response:
         response.raise_for_status()
         with destination.open("wb") as handle:
             for chunk in response.iter_content(chunk_size=1024 * 1024):
