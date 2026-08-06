@@ -174,8 +174,6 @@ One thing that could be confusing in the document is that it refers to some sour
 ## Dependencies
 
 - Python is required to run the setup and data processing scripts.
-- Node.js is required only if you want the optional `npx onedrive-link` helper to resolve SharePoint/OneDrive download links automatically.
-- If you are not using the OneDrive helper, Node.js is optional.
 
 ## Installing GDAL
 
