@@ -79,6 +79,8 @@ def load_config_payload(path: Path | None) -> dict:
     for key in ("patient_data_file", "pccf_file"):
         if key in payload and payload[key]:
             payload[key] = from_repo_path(payload[key])
+    if payload.get("pccf_file"):
+        payload["pccf_file"] = raw_pccf_path(payload["pccf_file"])
     return payload
 
 
@@ -108,6 +110,24 @@ def from_repo_path(value: str | Path | None) -> Path:
     if path.is_absolute():
         return path
     return (REPO_ROOT / path).resolve()
+
+
+def raw_pccf_path(path: Path | None) -> Path:
+    if not path:
+        return Path("")
+    candidate = Path(path)
+    if candidate.name.lower().endswith(" weighted.xlsx"):
+        return candidate.with_name(candidate.name[:-len(" weighted.xlsx")] + ".xlsx")
+    if candidate.stem.lower().endswith(" weighted"):
+        return candidate.with_name(f"{candidate.stem[:-9]}{candidate.suffix}")
+    return candidate
+
+
+def weighted_pccf_path(path: Path | None) -> Path:
+    raw_path = raw_pccf_path(path)
+    if not raw_path:
+        return Path("")
+    return raw_path.with_name(f"{raw_path.stem} weighted{raw_path.suffix}")
 
 
 def normalize_token(value: object) -> str:
@@ -422,15 +442,16 @@ with st.sidebar:
                 st.session_state.pending_dataset_name_input = selected_config.stem
         st.session_state.last_config_mode = mode
 
-    if mode == "Use current config" and selected_config and selected_config.exists() and st.session_state.loaded_config_path != selected_config:
-        reset_input_state()
-        sync_outcomes_from_payload(load_config_payload(selected_config))
-        st.session_state.loaded_config_path = selected_config
-    elif mode == "Create new config":
-        st.session_state.loaded_config_path = None
+if mode == "Use current config" and selected_config and selected_config.exists() and st.session_state.loaded_config_path != selected_config:
+    reset_input_state()
+    sync_outcomes_from_payload(load_config_payload(selected_config))
+    st.session_state.loaded_config_path = selected_config
+elif mode == "Create new config":
+    st.session_state.loaded_config_path = None
 
 editable = True if mode == "Use current config" else True
-active_payload = load_config_payload(selected_config) if selected_config else {}
+active_payload = load_config_payload(selected_config) if (selected_config and mode == "Use current config") else {}
+widget_scope = f"{mode}_{selected_config.stem if selected_config else 'none'}"
 
 st.header("1. Inputs")
 provinces_default = active_payload.get("provinces", ["MB"])
@@ -469,7 +490,7 @@ patient_source_path: Path | None = None
 patient_source_label = "none"
 if patient_source_mode == "Upload data":
     headers = read_uploaded_headers(patient_file)
-    if not headers and active_payload.get("patient_data_file"):
+    if not headers and mode == "Use current config" and active_payload.get("patient_data_file"):
         try:
             headers = read_headers(from_repo_path(active_payload["patient_data_file"]))
         except Exception:
@@ -501,26 +522,26 @@ else:
         if patient_file:
             st.write("Detected columns:")
             st.write(headers)
-if not patient_headers and active_payload.get("patient_data_file"):
-    try:
-        patient_headers = read_headers(from_repo_path(active_payload["patient_data_file"]))
-    except Exception:
-        patient_headers = []
-default_area = active_payload.get("area_link_column", "")
-default_age = active_payload.get("age_column") or ""
-default_sex = active_payload.get("sex_column") or ""
-default_los = active_payload.get("length_of_stay_column") or ""
-area_link = st.selectbox("Postal Code column", [""] + patient_headers, index=(patient_headers.index(default_area) + 1) if default_area in patient_headers else 0, disabled=not editable)
-age_col = st.selectbox("Age column", [""] + patient_headers, index=(patient_headers.index(default_age) + 1) if default_age in patient_headers else 0, disabled=not editable)
-sex_col = st.selectbox("Sex column", [""] + patient_headers, index=(patient_headers.index(default_sex) + 1) if default_sex in patient_headers else 0, disabled=not editable)
-los_col = st.selectbox("Length of stay column", [""] + patient_headers, index=(patient_headers.index(default_los) + 1) if default_los in patient_headers else 0, disabled=not editable)
+    if not patient_headers and mode == "Use current config" and active_payload.get("patient_data_file"):
+        try:
+            patient_headers = read_headers(from_repo_path(active_payload["patient_data_file"]))
+        except Exception:
+            patient_headers = []
+default_area = active_payload.get("area_link_column", "") if mode == "Use current config" else ""
+default_age = (active_payload.get("age_column") or "") if mode == "Use current config" else ""
+default_sex = (active_payload.get("sex_column") or "") if mode == "Use current config" else ""
+default_los = (active_payload.get("length_of_stay_column") or "") if mode == "Use current config" else ""
+area_link = st.selectbox("Postal Code column", [""] + patient_headers, index=(patient_headers.index(default_area) + 1) if default_area in patient_headers else 0, disabled=not editable, key=f"{widget_scope}_area_link")
+age_col = st.selectbox("Age column", [""] + patient_headers, index=(patient_headers.index(default_age) + 1) if default_age in patient_headers else 0, disabled=not editable, key=f"{widget_scope}_age")
+sex_col = st.selectbox("Sex column", [""] + patient_headers, index=(patient_headers.index(default_sex) + 1) if default_sex in patient_headers else 0, disabled=not editable, key=f"{widget_scope}_sex")
+los_col = st.selectbox("Length of stay column", [""] + patient_headers, index=(patient_headers.index(default_los) + 1) if default_los in patient_headers else 0, disabled=not editable, key=f"{widget_scope}_los")
 sex_series = pd.Series(dtype=str)
 if sex_col:
     if patient_source_mode == "Upload data" and patient_file:
         sex_series = get_series_from_uploaded(patient_file, sex_col)
     elif patient_source_mode == "Use data from another config" and patient_source_path:
         sex_series = get_series_from_path(patient_source_path, sex_col)
-    elif active_payload.get("patient_data_file"):
+    elif mode == "Use current config" and active_payload.get("patient_data_file"):
         sex_series = get_series_from_path(from_repo_path(active_payload["patient_data_file"]), sex_col)
 auto_sex_male, auto_sex_female = detect_sex_pair(sex_series)
 sex_male = active_payload.get("sex_male_value", auto_sex_male)
@@ -536,8 +557,8 @@ if mode == "Use current config" and selected_config and st.session_state.loaded_
     if not st.session_state.numeric_outcomes and default_numeric:
         st.session_state.numeric_outcomes = [dict(item) for item in default_numeric]
         st.session_state.numeric_count = len(default_numeric)
-binary_count = st.number_input("How many binary outcomes?", min_value=0, max_value=20, value=st.session_state.binary_count, key="binary_count_input", disabled=not editable)
-numeric_count = st.number_input("How many numeric outcomes?", min_value=0, max_value=20, value=st.session_state.numeric_count, key="numeric_count_input", disabled=not editable)
+binary_count = st.number_input("How many binary outcomes?", min_value=0, max_value=20, value=st.session_state.binary_count, key=f"{widget_scope}_binary_count_input", disabled=not editable)
+numeric_count = st.number_input("How many numeric outcomes?", min_value=0, max_value=20, value=st.session_state.numeric_count, key=f"{widget_scope}_numeric_count_input", disabled=not editable)
 st.session_state.binary_count = int(binary_count)
 st.session_state.numeric_count = int(numeric_count)
 ensure_outcome_lengths("binary", st.session_state.binary_count)
@@ -546,19 +567,19 @@ ensure_outcome_lengths("numeric", st.session_state.numeric_count)
 st.markdown("**Binary outcomes**")
 binary_labels = [outcome_label(item, f"Outcome {i + 1}", True) for i, item in enumerate(st.session_state.binary_outcomes)]
 if binary_labels:
-    st.session_state.binary_selected = st.selectbox("Select a binary outcome", range(len(binary_labels)), format_func=lambda i: binary_labels[i], key="binary_selected_picker", disabled=not editable)
+    st.session_state.binary_selected = st.selectbox("Select a binary outcome", range(len(binary_labels)), format_func=lambda i: binary_labels[i], key=f"{widget_scope}_binary_selected_picker", disabled=not editable)
     b_idx = int(st.session_state.binary_selected)
     b_item = st.session_state.binary_outcomes[b_idx]
     c1, c2, c3, c4 = st.columns([2, 3, 2, 2])
-    b_item["name"] = c1.text_input("Outcome name", value=b_item.get("name", ""), key=f"bin_name_{b_idx}", disabled=not editable)
-    b_item["raw_column"] = c2.selectbox("Raw column", [""] + headers, index=(headers.index(b_item.get("raw_column", "")) + 1) if b_item.get("raw_column", "") in headers else 0, key=f"bin_raw_{b_idx}", disabled=not editable)
+    b_item["name"] = c1.text_input("Outcome name", value=b_item.get("name", ""), key=f"{widget_scope}_bin_name_{b_idx}", disabled=not editable)
+    b_item["raw_column"] = c2.selectbox("Raw column", [""] + headers, index=(headers.index(b_item.get("raw_column", "")) + 1) if b_item.get("raw_column", "") in headers else 0, key=f"{widget_scope}_bin_raw_{b_idx}", disabled=not editable)
     binary_series = pd.Series(dtype=str)
     if b_item.get("raw_column"):
         if patient_source_mode == "Upload data" and patient_file:
             binary_series = get_series_from_uploaded(patient_file, b_item["raw_column"])
         elif patient_source_mode == "Use data from another config" and patient_source_path:
             binary_series = get_series_from_path(patient_source_path, b_item["raw_column"])
-        elif active_payload.get("patient_data_file"):
+        elif mode == "Use current config" and active_payload.get("patient_data_file"):
             binary_series = get_series_from_path(from_repo_path(active_payload["patient_data_file"]), b_item["raw_column"])
     auto_affirm, auto_negative = detect_binary_pair(binary_series)
     current_affirm = b_item.get("affirmative_value", "")
@@ -598,8 +619,8 @@ if numeric_labels:
     n_idx = int(st.session_state.numeric_selected)
     n_item = st.session_state.numeric_outcomes[n_idx]
     n1, n2 = st.columns([2, 4])
-    n_item["name"] = n1.text_input("Outcome name", value=n_item.get("name", ""), key=f"num_name_{n_idx}", disabled=not editable)
-    n_item["raw_column"] = n2.selectbox("Raw column", [""] + headers, index=(headers.index(n_item.get("raw_column", "")) + 1) if n_item.get("raw_column", "") in headers else 0, key=f"num_raw_{n_idx}", disabled=not editable)
+    n_item["name"] = n1.text_input("Outcome name", value=n_item.get("name", ""), key=f"{widget_scope}_num_name_{n_idx}", disabled=not editable)
+    n_item["raw_column"] = n2.selectbox("Raw column", [""] + headers, index=(headers.index(n_item.get("raw_column", "")) + 1) if n_item.get("raw_column", "") in headers else 0, key=f"{widget_scope}_num_raw_{n_idx}", disabled=not editable)
 else:
     st.caption("No numeric outcomes yet.")
 
@@ -699,11 +720,11 @@ if editable and save_clicked and dataset_name and area_link:
         _, pccf_folder = config_storage_paths(config_path.stem)
         pccf_dest = pccf_folder / pccf_file.name
         save_uploaded_file(pccf_file, pccf_dest)
-        pccf_path = pccf_dest
+        pccf_path = raw_pccf_path(pccf_dest)
     elif pccf_source_mode == "Use global PCCF" and pccf_source_path:
-        pccf_path = pccf_source_path
+        pccf_path = raw_pccf_path(pccf_source_path)
     else:
-        pccf_path = from_repo_path(active_payload.get("pccf_file", ""))
+        pccf_path = raw_pccf_path(from_repo_path(active_payload.get("pccf_file", "")))
 
     payload = {
         "dataset_name": dataset_name,
@@ -773,6 +794,13 @@ if selected_config:
             st.success("Raw census cleaning completed")
 
     st.subheader("Processing")
+    pccf_target = raw_pccf_path(from_repo_path(active_payload.get("pccf_file", "")))
+    pccf_weighted_target = weighted_pccf_path(pccf_target)
+    st.info(f"PCCF for selected config: `{pccf_target}`")
+    if pccf_weighted_target.exists():
+        st.success(f"Weighted PCCF detected: `{pccf_weighted_target.name}`")
+    else:
+        st.warning(f"Weighted PCCF not found yet: `{pccf_weighted_target.name}`")
     col1, col2 = st.columns(2)
     if col1.button("Build weighted PCCF"):
         with st.spinner("Building weighted PCCF..."):
