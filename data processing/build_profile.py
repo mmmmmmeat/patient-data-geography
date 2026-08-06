@@ -18,6 +18,7 @@ CONFIG_DIR = DATA_PROCESSING_DIR / "configs"
 CURRENT_CONFIG_FILE = CONFIG_DIR / "current_config.json"
 MERGED_DATA_DIR = DATA_PROCESSING_DIR / "map" / "merged data"
 FILTERED_CENSUS_PATH = DATA_PROCESSING_DIR / "stats" / "statcan" / "filtered" / "DA_filtered.csv"
+CSD_FILTERED_CENSUS_PATH = DATA_PROCESSING_DIR / "stats" / "statcan" / "filtered" / "CSD_filtered.csv"
 
 PCCF_POSTAL_COL = "POSTAL"
 PCCF_DAUID_COL = "DAUID"
@@ -25,8 +26,11 @@ PCCF_FSA_COL = "FSA"
 PCCF_CSDUID_COL = "CSDuid"
 PCCF_CITY_COL = "CSDname"
 PCCF_WEIGHT_COL = "weight"
+PCCF_WEIGHT_DA_COL = "weight_da"
+PCCF_WEIGHT_CSD_COL = "weight_csd"
 
 PRAIRIE_DA_COL = "ALT_GEO_CODE"
+PRAIRIE_DGUID_COL = "DGUID"
 PRAIRIE_ID_COL = "CHARACTERISTIC_ID"
 PRAIRIE_COUNT_COL = "C1_COUNT_TOTAL"
 PRAIRIE_RATE_COL = "C10_RATE_TOTAL"
@@ -48,13 +52,22 @@ def load_config(config_path: Path) -> dict:
     return json.loads(config_path.read_text(encoding="utf-8"))
 
 
+def from_repo_path(value: str | Path | None) -> Path:
+    if not value:
+        return Path("")
+    path = Path(value)
+    if path.is_absolute():
+        return path
+    return (BASE_DIR / path).resolve()
+
+
 def load_current_config_path() -> Path:
     if len(sys.argv) > 1:
         return Path(sys.argv[1])
     if not CURRENT_CONFIG_FILE.exists():
         raise FileNotFoundError(f"Missing current config pointer: {CURRENT_CONFIG_FILE}")
     payload = json.loads(CURRENT_CONFIG_FILE.read_text(encoding="utf-8"))
-    return Path(payload["current_config"])
+    return from_repo_path(payload["current_config"])
 
 
 def normalize_postal_code(value: object) -> str:
@@ -152,11 +165,17 @@ def load_weighted_pccf(pccf_path: Path) -> pd.DataFrame:
     if PCCF_CITY_COL in df.columns:
         df[PCCF_CITY_COL] = df[PCCF_CITY_COL].astype(str).str.strip()
         df = df.rename(columns={PCCF_CITY_COL: "csd_name"})
-    df[PCCF_WEIGHT_COL] = pd.to_numeric(df[PCCF_WEIGHT_COL], errors="coerce")
-    df = df.dropna(subset=[PCCF_DAUID_COL, PCCF_WEIGHT_COL])
-    df = df[df[PCCF_WEIGHT_COL] > 0].copy()
-    df[PCCF_WEIGHT_COL] = df.groupby(PCCF_POSTAL_COL)[PCCF_WEIGHT_COL].transform(lambda s: s / s.sum())
+    for col in [PCCF_WEIGHT_DA_COL, PCCF_WEIGHT_CSD_COL, PCCF_WEIGHT_COL]:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
     return df
+
+
+def weighted_pccf_candidate(raw_path: Path) -> Path:
+    stem = raw_path.stem
+    if stem.lower().endswith(" weighted"):
+        stem = stem[:-9]
+    return raw_path.with_name(f"{stem} weighted{raw_path.suffix}")
 
 
 def pccf_has_weight_column(path: Path) -> bool:
@@ -166,7 +185,8 @@ def pccf_has_weight_column(path: Path) -> bool:
         header = pd.read_excel(path, nrows=0, dtype=str)
     except Exception:
         return False
-    return PCCF_WEIGHT_COL.lower() in {str(col).strip().lower() for col in header.columns}
+    cols = {str(col).strip().lower() for col in header.columns}
+    return any(col in cols for col in [PCCF_WEIGHT_DA_COL, PCCF_WEIGHT_CSD_COL, PCCF_WEIGHT_COL])
 
 
 def describe_pccf_candidate(path: Path) -> str:
@@ -183,8 +203,13 @@ def assign_records_to_geos(raw_df: pd.DataFrame, pccf: pd.DataFrame, patient_lin
         return raw_df[raw_df[PCCF_FSA_COL].astype(str).str.len() == 3].copy()
 
     group_col = PCCF_DAUID_COL if map_area_type == "da" else PCCF_CSDUID_COL
+    weight_col = PCCF_WEIGHT_DA_COL if map_area_type == "da" else PCCF_WEIGHT_CSD_COL
+    if weight_col not in pccf.columns and PCCF_WEIGHT_COL in pccf.columns:
+        weight_col = PCCF_WEIGHT_COL
+    if weight_col not in pccf.columns:
+        raise KeyError(f"Missing weight column for {map_area_type}: expected {weight_col}")
     pccf_groups = {
-        postal: grp[[group_col, PCCF_WEIGHT_COL]].reset_index(drop=True)
+        postal: grp[[group_col, weight_col]].reset_index(drop=True)
         for postal, grp in pccf.groupby(PCCF_POSTAL_COL, sort=False)
     }
 
@@ -193,11 +218,17 @@ def assign_records_to_geos(raw_df: pd.DataFrame, pccf: pd.DataFrame, patient_lin
         candidates = pccf_groups.get(postal)
         if candidates is None or candidates.empty:
             continue
+        probs = pd.to_numeric(candidates[weight_col], errors="coerce").fillna(0).to_numpy(dtype=float)
+        probs_sum = probs.sum()
+        if probs_sum <= 0:
+            probs = np.full(len(candidates), 1.0 / len(candidates), dtype=float)
+        else:
+            probs = probs / probs_sum
         choices = rng.choice(
             candidates[group_col].to_numpy(),
             size=len(group),
             replace=True,
-            p=candidates[PCCF_WEIGHT_COL].to_numpy(),
+            p=probs,
         )
         temp = group.copy()
         temp[group_col] = choices
@@ -217,12 +248,24 @@ def safe_pct(series: pd.Series, denom: int) -> float | None:
     return float(numeric.sum() / denom * 100.0)
 
 
+def normalize_value(value: object) -> str:
+    return str(value).strip().lower()
+
+
+def sex_masks(series: pd.Series, cfg: dict) -> tuple[pd.Series, pd.Series]:
+    values = series.astype(str).map(normalize_value)
+    male_value = normalize_value(cfg.get("sex_male_value") or "m")
+    female_value = normalize_value(cfg.get("sex_female_value") or "f")
+    return values == male_value, values == female_value
+
+
 def build_patient_aggregation(assigned: pd.DataFrame, cfg: dict, map_area_type: str) -> pd.DataFrame:
     age_col = cfg.get("age_column")
     sex_col = cfg.get("sex_column")
     length_of_stay_col = cfg.get("length_of_stay_column")
     numeric_outcomes = cfg.get("numeric_outcomes", [])
     binary_outcomes = cfg.get("binary_outcomes", [])
+    privacy_min_incidents = int(cfg.get("privacy_min_incidents", 0) or 0)
     group_col = PCCF_DAUID_COL if map_area_type == "da" else PCCF_CSDUID_COL if map_area_type == "csd" else PCCF_FSA_COL
 
     if assigned.empty or group_col not in assigned.columns:
@@ -233,9 +276,9 @@ def build_patient_aggregation(assigned: pd.DataFrame, cfg: dict, map_area_type: 
         row: dict[str, object] = {group_col: geo_id}
         row["incidents_total"] = int(len(g))
         if sex_col and sex_col in g.columns:
-            sex_values = g[sex_col].astype(str).str.upper()
-            row["incidents_m"] = int((sex_values == "M").sum())
-            row["incidents_f"] = int((sex_values == "F").sum())
+            male_mask, female_mask = sex_masks(g[sex_col], cfg)
+            row["incidents_m"] = int(male_mask.sum())
+            row["incidents_f"] = int(female_mask.sum())
         else:
             row["incidents_m"] = None
             row["incidents_f"] = None
@@ -252,9 +295,7 @@ def build_patient_aggregation(assigned: pd.DataFrame, cfg: dict, map_area_type: 
             base_name = outcome["name"]
             row[f"{base_name}_total"] = float((mask == aff).sum() / len(g) * 100.0) if len(g) else None
             if sex_col and sex_col in g.columns:
-                sex_values = g[sex_col].astype(str).str.upper()
-                male_mask = sex_values == "M"
-                female_mask = sex_values == "F"
+                male_mask, female_mask = sex_masks(g[sex_col], cfg)
                 row[f"{base_name}_m"] = float((mask[male_mask] == aff).sum() / max(male_mask.sum(), 1) * 100.0) if male_mask.any() else None
                 row[f"{base_name}_f"] = float((mask[female_mask] == aff).sum() / max(female_mask.sum(), 1) * 100.0) if female_mask.any() else None
 
@@ -264,26 +305,53 @@ def build_patient_aggregation(assigned: pd.DataFrame, cfg: dict, map_area_type: 
                 base_name = outcome["name"]
                 row[f"{base_name}_total"] = safe_mean(g[raw_col])
                 if sex_col and sex_col in g.columns:
-                    sex_values = g[sex_col].astype(str).str.upper()
-                    row[f"{base_name}_m"] = safe_mean(g.loc[sex_values == "M", raw_col])
-                    row[f"{base_name}_f"] = safe_mean(g.loc[sex_values == "F", raw_col])
+                    male_mask, female_mask = sex_masks(g[sex_col], cfg)
+                    row[f"{base_name}_m"] = safe_mean(g.loc[male_mask, raw_col])
+                    row[f"{base_name}_f"] = safe_mean(g.loc[female_mask, raw_col])
+
+        if privacy_min_incidents > 0 and row["incidents_total"] < privacy_min_incidents:
+            for outcome in binary_outcomes + numeric_outcomes:
+                base_name = outcome["name"]
+                for suffix in ("_total", "_m", "_f"):
+                    row[f"{base_name}{suffix}"] = np.nan
 
         rows.append(row)
     return pd.DataFrame(rows)
 
 
-def load_prairies_characteristics(dauids: set[str]) -> pd.DataFrame:
-    if not FILTERED_CENSUS_PATH.exists():
-        raise FileNotFoundError(f"Missing filtered census file: {FILTERED_CENSUS_PATH}")
+def normalize_csd_dguid(value: object) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if text.startswith("2021A0005"):
+        return text
+    if text.endswith(".0"):
+        text = text[:-2]
+    return f"2021A0005{text}"
+
+
+def load_prairies_characteristics(geo_ids: set[str], map_area_type: str) -> pd.DataFrame:
+    census_path = CSD_FILTERED_CENSUS_PATH if map_area_type == "csd" else FILTERED_CENSUS_PATH
+    if not census_path.exists():
+        raise FileNotFoundError(f"Missing filtered census file: {census_path}")
     wide: dict[str, dict[str, float]] = defaultdict(dict)
-    for chunk in pd.read_csv(FILTERED_CENSUS_PATH, dtype=str, encoding="utf-8-sig", chunksize=500_000):
-        if PRAIRIE_DA_COL not in chunk.columns or PRAIRIE_ID_COL not in chunk.columns:
+    for chunk in pd.read_csv(census_path, dtype=str, encoding="utf-8-sig", chunksize=500_000):
+        if PRAIRIE_ID_COL not in chunk.columns:
             continue
-        chunk[PRAIRIE_DA_COL] = chunk[PRAIRIE_DA_COL].astype(str).str.strip()
+        if map_area_type == "csd":
+            if PRAIRIE_DGUID_COL not in chunk.columns:
+                continue
+            chunk[PRAIRIE_DGUID_COL] = chunk[PRAIRIE_DGUID_COL].astype(str).str.strip()
+            chunk["_geo_id"] = chunk[PRAIRIE_DGUID_COL].map(normalize_csd_dguid)
+        else:
+            if PRAIRIE_DA_COL not in chunk.columns:
+                continue
+            chunk[PRAIRIE_DA_COL] = chunk[PRAIRIE_DA_COL].astype(str).str.strip()
+            chunk["_geo_id"] = chunk[PRAIRIE_DA_COL]
         chunk[PRAIRIE_ID_COL] = chunk[PRAIRIE_ID_COL].astype(str).str.strip()
-        sub = chunk[chunk[PRAIRIE_DA_COL].isin(dauids) & chunk[PRAIRIE_ID_COL].isin(SDOH_IDS)]
+        sub = chunk[chunk["_geo_id"].isin(geo_ids) & chunk[PRAIRIE_ID_COL].isin(SDOH_IDS)]
         for _, row in sub.iterrows():
-            dauid = row[PRAIRIE_DA_COL]
+            dauid = row["_geo_id"]
             cid = row[PRAIRIE_ID_COL]
             if cid == "113":
                 wide[dauid]["income_median"] = to_float(row.get(PRAIRIE_COUNT_COL))
@@ -309,7 +377,8 @@ def load_prairies_characteristics(dauids: set[str]) -> pd.DataFrame:
                 wide[dauid]["car_commute_rate"] = to_float(row.get(PRAIRIE_RATE_COL))
             elif cid in {"2612", "2613", "2614", "2615", "2616"}:
                 wide[dauid][f"commute_{cid}_rate"] = to_float(row.get(PRAIRIE_RATE_COL))
-    return pd.DataFrame.from_dict(wide, orient="index").reset_index().rename(columns={"index": PCCF_DAUID_COL})
+    out = pd.DataFrame.from_dict(wide, orient="index").reset_index().rename(columns={"index": "geo_id"})
+    return out
 
 
 def load_equivalence_scores() -> pd.DataFrame:
@@ -393,9 +462,9 @@ def build_base_table(pccf: pd.DataFrame) -> pd.DataFrame:
 def main() -> None:
     config_path = load_current_config_path()
     config = load_config(config_path)
-    raw_path = Path(config["patient_data_file"])
-    pccf_raw_path = Path(config["pccf_file"])
-    pccf_weighted_path = pccf_raw_path.with_name(f"{pccf_raw_path.stem} weighted{pccf_raw_path.suffix}")
+    raw_path = from_repo_path(config["patient_data_file"])
+    pccf_raw_path = from_repo_path(config["pccf_file"])
+    pccf_weighted_path = weighted_pccf_candidate(pccf_raw_path)
     map_area_type = str(config.get("map_area_type", "map")).strip().lower() or "map"
     patient_link = config["area_link_column"]
     age_col = config.get("age_column")
@@ -415,7 +484,15 @@ def main() -> None:
         config.get("binary_outcomes", []),
         config.get("numeric_outcomes", []),
     )
-    if pccf_weighted_path.exists():
+    if map_area_type == "fsa":
+        pccf = load_weighted_pccf(pccf_raw_path) if pccf_has_weight_column(pccf_raw_path) else pd.read_excel(pccf_raw_path, dtype=str, engine="openpyxl")
+        pccf[PCCF_POSTAL_COL] = pccf[PCCF_POSTAL_COL].map(normalize_postal_code)
+        if PCCF_FSA_COL in pccf.columns:
+            pccf[PCCF_FSA_COL] = pccf[PCCF_FSA_COL].astype(str).str.strip().str.upper().str[:3]
+        if PCCF_CITY_COL in pccf.columns:
+            pccf[PCCF_CITY_COL] = pccf[PCCF_CITY_COL].astype(str).str.strip()
+            pccf = pccf.rename(columns={PCCF_CITY_COL: "csd_name"})
+    elif pccf_weighted_path.exists():
         pccf = load_weighted_pccf(pccf_weighted_path)
     elif pccf_has_weight_column(pccf_raw_path):
         pccf = load_weighted_pccf(pccf_raw_path)
@@ -429,10 +506,13 @@ def main() -> None:
 
     if map_area_type == "da":
         geo_col = PCCF_DAUID_COL
+        weight_col = PCCF_WEIGHT_DA_COL
     elif map_area_type == "csd":
         geo_col = PCCF_CSDUID_COL
+        weight_col = PCCF_WEIGHT_CSD_COL
     elif map_area_type == "fsa":
         geo_col = PCCF_FSA_COL
+        weight_col = None
     else:
         raise ValueError(f"Unsupported map area type: {map_area_type}")
 
@@ -444,12 +524,16 @@ def main() -> None:
     base = base.merge(patient_agg, on=geo_col, how="left")
 
     if map_area_type == "da":
-        sdoh_raw = load_prairies_characteristics(set(base[geo_col].astype(str)))
+        sdoh_raw = load_prairies_characteristics(set(base[geo_col].astype(str)), map_area_type)
         equiv = load_equivalence_scores()
         quint = load_prairies_quintiles()
-        base = base.merge(sdoh_raw, on=geo_col, how="left")
+        base = base.merge(sdoh_raw, left_on=geo_col, right_on="geo_id", how="left")
         base = base.merge(equiv, on=geo_col, how="left", suffixes=("", "_equiv"))
         base = base.merge(quint, on=geo_col, how="left", suffixes=("", "_quint"))
+    elif map_area_type == "csd":
+        base["geo_id"] = base[geo_col].map(normalize_csd_dguid)
+        sdoh_raw = load_prairies_characteristics(set(base["geo_id"].astype(str)), map_area_type)
+        base = base.merge(sdoh_raw, on="geo_id", how="left")
     else:
         base["dep_mat"] = np.nan
         base["dep_soc"] = np.nan
@@ -486,6 +570,7 @@ def main() -> None:
         if col not in base.columns:
             base[col] = np.nan
     output = base[out_cols].copy()
+    privacy_min_incidents = int(config.get("privacy_min_incidents", 0) or 0)
     MERGED_DATA_DIR.mkdir(parents=True, exist_ok=True)
     output_name = f"{config_path.stem}.csv"
     output_path = MERGED_DATA_DIR / output_name
@@ -496,6 +581,7 @@ def main() -> None:
         "config_name": config_path.stem,
         "binary_outcomes": config.get("binary_outcomes", []),
         "numeric_outcomes": config.get("numeric_outcomes", []),
+        "privacy_min_incidents": privacy_min_incidents,
         "base_columns": {
             "geo": geo_col,
             "csd_name": "csd_name" if "csd_name" in output.columns else None,

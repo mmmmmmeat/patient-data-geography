@@ -27,6 +27,24 @@ PROVINCES = ["NL", "PE", "NS", "NB", "QC", "ON", "MB", "SK", "AB", "BC", "YT", "
 AREA_TYPES = {"1": "da", "2": "csd", "3": "fsa"}
 
 
+def to_repo_path(path: Path | None) -> str:
+    if not path:
+        return ""
+    try:
+        return str(path.resolve().relative_to(BASE_DIR)).replace("\\", "/")
+    except Exception:
+        return str(path)
+
+
+def from_repo_path(value: str | Path | None) -> Path:
+    if not value:
+        return Path("")
+    path = Path(value)
+    if path.is_absolute():
+        return path
+    return (BASE_DIR / path).resolve()
+
+
 @dataclass
 class BinaryOutcome:
     name: str
@@ -52,6 +70,8 @@ class DatasetConfig:
     area_link_column: str
     age_column: str | None
     sex_column: str | None
+    sex_male_value: str | None
+    sex_female_value: str | None
     length_of_stay_column: str | None
     binary_outcomes: list[BinaryOutcome]
     numeric_outcomes: list[NumericOutcome]
@@ -82,6 +102,49 @@ def prompt_required(text: str) -> str:
 def prompt_optional(text: str) -> str | None:
     value = prompt(text)
     return value or None
+
+
+def read_headers_from_patient_file(path: Path) -> list[str]:
+    if path.suffix.lower() in {".xlsx", ".xls"}:
+        return list(pd.read_excel(path, nrows=0).columns)
+    return list(pd.read_csv(path, nrows=0).columns)
+
+
+def read_column_values(path: Path, column: str) -> pd.Series:
+    if path.suffix.lower() in {".xlsx", ".xls"}:
+        df = pd.read_excel(path, dtype=str)
+    else:
+        df = pd.read_csv(path, dtype=str, encoding="utf-8-sig")
+    return df[column] if column in df.columns else pd.Series(dtype=str)
+
+
+def normalize_token(value: object) -> str:
+    return str(value).strip().lower()
+
+
+def titleish(value: str) -> str:
+    value = str(value).strip()
+    if not value:
+        return value
+    if len(value) == 1:
+        return value.upper()
+    return value[0].upper() + value[1:].lower()
+
+
+def detect_pair(series: pd.Series, candidates: list[str], pairing: dict[str, str]) -> tuple[str, str]:
+    values = [normalize_token(v) for v in series.dropna().astype(str).tolist()]
+    for cand in candidates:
+        if cand in values:
+            return titleish(cand), titleish(pairing[cand])
+    return "?", "?"
+
+
+def detect_binary_pair(series: pd.Series) -> tuple[str, str]:
+    return detect_pair(series, ["yes", "y", "1", "no", "n", "0"], {"yes": "no", "y": "n", "1": "0", "no": "yes", "n": "y", "0": "1"})
+
+
+def detect_sex_pair(series: pd.Series) -> tuple[str, str]:
+    return detect_pair(series, ["male", "m", "female", "f"], {"male": "female", "m": "f", "female": "male", "f": "m"})
 
 
 def prompt_existing_file(folder: Path, prompt_text: str) -> str:
@@ -153,6 +216,21 @@ def prompt_numeric_outcomes() -> list[NumericOutcome]:
     return outcomes
 
 
+def prompt_column_choice(prompt_text: str, headers: list[str]) -> str:
+    if not headers:
+        raise ValueError("No columns found in the patient file.")
+    print(prompt_text)
+    for i, header in enumerate(headers, start=1):
+        print(f"  {i}. {header}")
+    while True:
+        choice = prompt_required("Select a column by number: ")
+        if choice.isdigit():
+            idx = int(choice) - 1
+            if 0 <= idx < len(headers):
+                return headers[idx]
+        print("Invalid selection.")
+
+
 def load_keyed_links(path: Path) -> dict[str, str]:
     if not path.exists():
         return {}
@@ -201,28 +279,6 @@ def download_file(url: str, destination: Path) -> None:
                     target.write(chunk)
 
 
-def resolve_onedrive_link(url: str) -> str:
-    url = url.strip()
-    lowered = url.lower()
-    if "sharepoint.com" not in lowered and "onedrive.live.com" not in lowered:
-        return url
-
-    try:
-        completed = subprocess.run(
-            ["npx", "onedrive-link", url],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except FileNotFoundError:
-        return url
-    except subprocess.CalledProcessError:
-        return url
-
-    resolved = completed.stdout.strip()
-    return resolved or url
-
-
 def unzip_archive(archive_path: Path, destination_dir: Path) -> None:
     with archive_path.open("rb") as handle:
         signature = handle.read(4)
@@ -267,7 +323,7 @@ def write_json(path: Path, payload: dict) -> None:
 
 def set_current_config(config_path: Path) -> None:
     CURRENT_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    CURRENT_CONFIG_FILE.write_text(json.dumps({"current_config": str(config_path)}, indent=2), encoding="utf-8")
+    CURRENT_CONFIG_FILE.write_text(json.dumps({"current_config": to_repo_path(config_path)}, indent=2), encoding="utf-8")
 
 
 def list_configs() -> list[Path]:
@@ -281,7 +337,7 @@ def load_selected_config_path() -> Path | None:
         return None
     try:
         payload = json.loads(CURRENT_CONFIG_FILE.read_text(encoding="utf-8"))
-        candidate = Path(payload["current_config"])
+        candidate = from_repo_path(payload["current_config"])
         return candidate if candidate.exists() else None
     except Exception:
         return None
@@ -314,7 +370,7 @@ def select_config_flow() -> tuple[Path, bool]:
     current_label = current.name if current is not None else "none"
     print("Startup options:")
     print(f"  1. Continue with current config ({current_label})")
-    print("  2. Select a different config")
+    print("  2. Change current config")
     print("  3. Make a new config")
     while True:
         choice = prompt("Select an option: ")
@@ -342,26 +398,66 @@ def create_new_config() -> Path:
     provinces = prompt_provinces()
     map_area_type = prompt_map_area_type()
     map_data_name = build_map_data_name(provinces, map_area_type)
+    patient_path = DATA_PROCESSING_DIR / "patient data" / patient_data_file
+    patient_headers = read_headers_from_patient_file(patient_path)
 
     print()
     print("Base patient columns")
-    area_link_column = prompt_required("Link field column name: ")
+    area_link_column = prompt_column_choice("Postal Code column:", patient_headers)
     age_column = prompt_optional("Age column name (blank for none): ")
     sex_column = prompt_optional("Sex column name (blank for none): ")
     length_of_stay_column = prompt_optional("Length of stay column name (blank for none): ")
     binary_outcomes = prompt_binary_outcomes()
     numeric_outcomes = prompt_numeric_outcomes()
+    sex_male_value = None
+    sex_female_value = None
+    if sex_column:
+        sex_series = read_column_values(patient_path, sex_column)
+        sex_male_value, sex_female_value = detect_sex_pair(sex_series)
+        print(f"Detected sex values: {sex_male_value} / {sex_female_value}")
+        override = prompt_yes_no("Do you want to change the detected sex values?")
+        if override:
+            sex_male_value = prompt_required("Male value: ")
+            sex_female_value = prompt_required("Female value: ")
+
+    for outcome in binary_outcomes:
+        if outcome.raw_column in patient_headers:
+            values = read_column_values(patient_path, outcome.raw_column)
+            aff, neg = detect_binary_pair(values)
+            print(f"Detected binary values for {outcome.name}: {aff} / {neg}")
+            override = prompt_yes_no("Do you want to change the detected binary values?")
+            if override:
+                outcome.affirmative_value = prompt_required("Affirmative value: ")
+                outcome.negative_value = prompt_required("Negative value: ")
+            else:
+                outcome.affirmative_value = aff
+                outcome.negative_value = neg
+
+    patient_folder = DATA_PROCESSING_DIR / "patient data" / dataset_name
+    pccf_folder = DATA_PROCESSING_DIR / "PCCF" / dataset_name
+    patient_folder.mkdir(parents=True, exist_ok=True)
+    pccf_folder.mkdir(parents=True, exist_ok=True)
+    patient_source = DATA_PROCESSING_DIR / "patient data" / patient_data_file
+    pccf_source = DATA_PROCESSING_DIR / "PCCF" / pccf_file
+    patient_dest = patient_folder / patient_data_file
+    pccf_dest = pccf_folder / pccf_file
+    if patient_source.exists():
+        shutil.copy2(patient_source, patient_dest)
+    if pccf_source.exists():
+        shutil.copy2(pccf_source, pccf_dest)
 
     config = DatasetConfig(
         dataset_name=dataset_name,
         map_data_name=map_data_name,
-        patient_data_file=str(DATA_PROCESSING_DIR / "patient data" / patient_data_file),
-        pccf_file=str(DATA_PROCESSING_DIR / "PCCF" / pccf_file),
+        patient_data_file=to_repo_path(patient_dest),
+        pccf_file=to_repo_path(pccf_dest),
         provinces=provinces,
         map_area_type=map_area_type,
         area_link_column=area_link_column,
         age_column=age_column,
         sex_column=sex_column,
+        sex_male_value=sex_male_value,
+        sex_female_value=sex_female_value,
         length_of_stay_column=length_of_stay_column,
         binary_outcomes=binary_outcomes,
         numeric_outcomes=numeric_outcomes,
@@ -388,8 +484,8 @@ def census_filter_script() -> Path:
 
 def run_selected_config(config_path: Path) -> None:
     config = json.loads(config_path.read_text(encoding="utf-8"))
-    pccf_file = Path(config["pccf_file"]).name
-    pccf_path = DATA_PROCESSING_DIR / "PCCF" / pccf_file
+    pccf_path = from_repo_path(config["pccf_file"])
+    pccf_file = pccf_path.name
     pccf_weighted_path = pccf_path.with_name(f"{pccf_path.stem} weighted{pccf_path.suffix}")
     stats_links = load_keyed_links(STATS_LINKS_FILE)
 
@@ -404,7 +500,7 @@ def run_selected_config(config_path: Path) -> None:
             with tempfile.TemporaryDirectory() as tmpdir:
                 tmp_archive = Path(tmpdir) / "filtered_census.zip"
                 print("Downloading pre-filtered census data...")
-                download_file(resolve_onedrive_link(stats_link_url), tmp_archive)
+                download_file(stats_link_url, tmp_archive)
                 print("Unzipping pre-filtered census data...")
                 unzip_archive(tmp_archive, CENSUS_FILTERED_PATH.parent)
         else:
