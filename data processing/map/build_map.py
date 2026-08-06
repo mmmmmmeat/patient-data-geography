@@ -8,6 +8,8 @@ import tempfile
 import csv
 import urllib.request
 import zipfile
+import shutil
+import os
 from pathlib import Path
 
 
@@ -57,9 +59,16 @@ def find_gdb_root(folder: Path) -> Path:
 
 
 def get_ogr2ogr() -> str:
-    qgis_ogr2ogr = Path(r"C:\Program Files\QGIS 4.0.1\bin\ogr2ogr.exe")
-    if qgis_ogr2ogr.exists():
-        return str(qgis_ogr2ogr)
+    env_candidates = [
+        os.environ.get("OGR2OGR_PATH"),
+        os.environ.get("GDAL_OGR2OGR"),
+        os.environ.get("QGIS_OGR2OGR"),
+    ]
+    for candidate in env_candidates:
+        if candidate:
+            candidate_path = Path(candidate)
+            if candidate_path.exists():
+                return str(candidate_path)
     found = shutil.which("ogr2ogr")
     if found:
         return found
@@ -107,11 +116,17 @@ def province_postal_letters(provinces: list[str]) -> list[str]:
     return sorted(set(letters))
 
 
+def build_map_data_name(provinces: list[str], map_area_type: str) -> str:
+    province_key = "".join(sorted(provinces))
+    return f"{province_key}_{map_area_type.upper()}"
+
+
 def build_where_clause(area_field: str, provinces: list[str], map_area_type: str) -> str | None:
     if not provinces:
         return None
+    map_area_type = str(map_area_type).strip().lower()
 
-    if map_area_type in {"postal code", "FSA"}:
+    if map_area_type in {"postal code", "fsa"}:
         letters = province_postal_letters(provinces)
         if not letters:
             return None
@@ -149,7 +164,8 @@ def build_map(config: dict) -> None:
     download_path = workspace / "map.zip"
     extracted_dir = workspace / "extracted"
     filtered_gpkg = workspace / "filtered.gpkg"
-    out_xyz = MAP_DATA_DIR / config["dataset_name"] / map_area_type.replace(" ", "_")
+    map_data_name = config.get("map_data_name") or build_map_data_name(provinces, map_area_type)
+    out_xyz = MAP_DATA_DIR / map_data_name
 
     print(f"Downloading {map_area_type} map...")
     download_file(map_url, download_path)
@@ -180,6 +196,7 @@ def build_map(config: dict) -> None:
 
     summary = {
         "dataset_name": config["dataset_name"],
+        "map_data_name": map_data_name,
         "map_area_type": map_area_type,
         "area_type_in_data": area_type_in_data,
         "provinces": provinces,
