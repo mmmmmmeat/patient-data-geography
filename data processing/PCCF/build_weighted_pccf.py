@@ -16,6 +16,7 @@ from pathlib import Path
 import pandas as pd
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DATA_PROCESSING_DIR = Path(__file__).resolve().parents[1]
 CONFIG_DIR = DATA_PROCESSING_DIR / "configs"
 CURRENT_CONFIG_FILE = CONFIG_DIR / "current_config.json"
@@ -40,7 +41,7 @@ def from_repo_path(value: str | Path | None) -> Path:
     path = Path(value)
     if path.is_absolute():
         return path
-    return (DATA_PROCESSING_DIR.parent / path).resolve()
+    return (PROJECT_ROOT / path).resolve()
 
 
 def raw_pccf_candidate(path: Path) -> Path:
