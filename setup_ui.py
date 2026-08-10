@@ -758,7 +758,7 @@ if editable and save_clicked and dataset_name and area_link:
     st.rerun()
 
 st.header("2. Process")
-if selected_config:
+if mode == "Use current config" and selected_config:
     st.write(f"Selected config: `{selected_config.name}`")
     census_links = load_keyed_links(STATS_LINKS_FILE)
     prefiltered_url = census_links.get("FILTERED")
@@ -795,21 +795,30 @@ if selected_config:
 
     st.subheader("Processing")
     pccf_target = raw_pccf_path(from_repo_path(active_payload.get("pccf_file", "")))
-    pccf_weighted_target = weighted_pccf_path(pccf_target)
-    st.info(f"PCCF for selected config: `{pccf_target}`")
-    if pccf_weighted_target.exists():
-        st.success(f"Weighted PCCF detected: `{pccf_weighted_target.name}`")
+    if pccf_target and pccf_target.name:
+        pccf_weighted_target = weighted_pccf_path(pccf_target)
+        st.info(f"PCCF for selected config: `{pccf_target}`")
+        if pccf_weighted_target.exists():
+            st.success(f"Weighted PCCF detected: `{pccf_weighted_target.name}`")
+        else:
+            st.warning(f"Weighted PCCF not found yet: `{pccf_weighted_target.name}`")
     else:
-        st.warning(f"Weighted PCCF not found yet: `{pccf_weighted_target.name}`")
+        st.info("PCCF for selected config: not set yet")
     col1, col2 = st.columns(2)
     if col1.button("Build weighted PCCF"):
-        with st.spinner("Building weighted PCCF..."):
-            run_script(DATA_PROCESSING_DIR / "PCCF" / "build_weighted_pccf.py", str(selected_config))
-        st.success("PCCF weighting done")
+        try:
+            with st.spinner("Building weighted PCCF..."):
+                run_script(DATA_PROCESSING_DIR / "PCCF" / "build_weighted_pccf.py", str(selected_config))
+            st.success("PCCF weighting done")
+        except subprocess.CalledProcessError as exc:
+            st.error(f"PCCF weighting failed: {exc}")
     if col2.button("Build profile"):
-        with st.spinner("Building merged profile..."):
-            run_script(DATA_PROCESSING_DIR / "build_profile.py", str(selected_config))
-        st.success("Profile build done")
+        try:
+            with st.spinner("Building merged profile..."):
+                run_script(DATA_PROCESSING_DIR / "build_profile.py", str(selected_config))
+            st.success("Profile build done")
+        except subprocess.CalledProcessError as exc:
+            st.error(f"Profile build failed: {exc}")
 else:
     st.warning("Create or select a config to enable processing.")
 
