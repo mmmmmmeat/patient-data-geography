@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 
 
-BASE_DIR = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_PROCESSING_DIR = Path(__file__).resolve().parent
 CONFIG_DIR = DATA_PROCESSING_DIR / "configs"
 CURRENT_CONFIG_FILE = CONFIG_DIR / "current_config.json"
@@ -58,7 +58,7 @@ def from_repo_path(value: str | Path | None) -> Path:
     path = Path(value)
     if path.is_absolute():
         return path
-    return (BASE_DIR / path).resolve()
+    return (PROJECT_ROOT / path).resolve()
 
 
 def load_current_config_path() -> Path:
@@ -576,7 +576,7 @@ def main() -> None:
     output_path = MERGED_DATA_DIR / output_name
     output.to_csv(output_path, index=False)
     manifest = {
-        "output_csv": str(output_path.relative_to(BASE_DIR)).replace("\\", "/"),
+        "output_csv": str(output_path.relative_to(PROJECT_ROOT)).replace("\\", "/"),
         "map_area_type": map_area_type,
         "config_name": config_path.stem,
         "binary_outcomes": config.get("binary_outcomes", []),
