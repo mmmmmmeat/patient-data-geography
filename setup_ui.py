@@ -18,8 +18,6 @@ import streamlit.components.v1 as components
 
 ROOT = Path(__file__).resolve().parent
 REPO_ROOT = ROOT.parent
-APP_VERSION = "1.4"
-APP_BUILD_DATE = "2026-07-29"
 DATA_PROCESSING_DIR = ROOT / "data processing"
 CONFIG_DIR = DATA_PROCESSING_DIR / "configs"
 CURRENT_CONFIG_FILE = CONFIG_DIR / "current_config.json"
@@ -366,8 +364,6 @@ def outcome_label(item: dict, default_name: str, is_binary: bool) -> str:
 
 st.set_page_config(page_title="Dataset Setup", layout="wide")
 st.title("Dataset Setup")
-st.caption("Create a config, inspect columns, and run the processing steps from a guided UI.")
-st.markdown(f"**Version:** {APP_VERSION}  \n**Build date:** {APP_BUILD_DATE}")
 
 init_outcome_state()
 
@@ -454,6 +450,7 @@ active_payload = load_config_payload(selected_config) if (selected_config and mo
 widget_scope = f"{mode}_{selected_config.stem if selected_config else 'none'}"
 
 st.header("1. Inputs")
+st.divider()
 provinces_default = active_payload.get("provinces", ["MB"])
 map_area_default = active_payload.get("map_area_type", "da")
 dataset_name_default = active_payload.get("dataset_name", "")
@@ -463,7 +460,6 @@ map_area_type = st.selectbox("Map area type", AREA_TYPES, index=AREA_TYPES.index
 if mode == "Use current config" and selected_config:
     if not st.session_state.dataset_name_input:
         st.session_state.pending_dataset_name_input = selected_config.stem
-dataset_name = st.text_input("Config name", value=st.session_state.dataset_name_input if st.session_state.dataset_name_input else dataset_name_default, key="dataset_name_input", disabled=not editable)
 privacy_min_incidents = st.number_input(
     "Exclude outcomes in areas with less than this many incidents",
     min_value=0,
@@ -473,80 +469,37 @@ privacy_min_incidents = st.number_input(
     disabled=not editable,
 )
 
-patient_source_mode = st.radio(
-    "Patient data source",
-    ["Upload data", "Use data from another config"],
-    horizontal=True,
-    disabled=not editable,
-    key="patient_source_mode",
-)
-patient_file = None
-if patient_source_mode == "Upload data":
-    patient_file = st.file_uploader("Drop patient file here", type=["csv", "xlsx"], disabled=not editable)
+patient_file = st.file_uploader("Drop patient file here", type=["csv", "xlsx"], disabled=not editable)
 
+st.divider()
 st.subheader("Patient columns")
 patient_headers: list[str] = []
 patient_source_path: Path | None = None
 patient_source_label = "none"
-if patient_source_mode == "Upload data":
-    headers = read_uploaded_headers(patient_file)
-    if not headers and mode == "Use current config" and active_payload.get("patient_data_file"):
-        try:
-            headers = read_headers(from_repo_path(active_payload["patient_data_file"]))
-        except Exception:
-            headers = []
-    if patient_file:
-        st.write("Detected columns:")
-        st.write(headers)
-    patient_source_path = Path(patient_file.name) if patient_file else None
-    patient_source_label = patient_file.name if patient_file else "none"
-    patient_headers = headers
-else:
-    other_configs = other_config_options(selected_config)
-    if other_configs:
-        source_config = st.selectbox("Select source config", other_configs, format_func=lambda p: p.name, disabled=not editable, key="patient_source_config")
-        source_payload = load_config_payload(source_config)
-        patient_source_path = source_payload.get("patient_data_file") if source_payload.get("patient_data_file") else None
-        patient_source_label = source_config.name
-        if patient_source_path and patient_source_path.exists():
-            patient_headers = read_headers(patient_source_path)
-            st.info(f"Using patient data from `{source_config.name}`")
-        else:
-            st.warning("Selected config does not have a usable patient data file.")
-    else:
-        st.info("No other configs were found.")
-        patient_source_mode = "Upload data"
-        patient_file = st.file_uploader("Drop patient file here", type=["csv", "xlsx"], disabled=not editable, key="patient_file_fallback")
-        headers = read_uploaded_headers(patient_file)
-        patient_headers = headers
-        if patient_file:
-            st.write("Detected columns:")
-            st.write(headers)
-    if not patient_headers and mode == "Use current config" and active_payload.get("patient_data_file"):
-        try:
-            patient_headers = read_headers(from_repo_path(active_payload["patient_data_file"]))
-        except Exception:
-            patient_headers = []
+headers = read_uploaded_headers(patient_file)
+if patient_file:
+    st.write("Detected columns:")
+    st.write(headers)
+patient_source_path = Path(patient_file.name) if patient_file else None
+patient_source_label = patient_file.name if patient_file else "none"
+patient_headers = headers
 default_area = active_payload.get("area_link_column", "") if mode == "Use current config" else ""
 default_age = (active_payload.get("age_column") or "") if mode == "Use current config" else ""
 default_sex = (active_payload.get("sex_column") or "") if mode == "Use current config" else ""
-default_los = (active_payload.get("length_of_stay_column") or "") if mode == "Use current config" else ""
 area_link = st.selectbox("Postal Code column", [""] + patient_headers, index=(patient_headers.index(default_area) + 1) if default_area in patient_headers else 0, disabled=not editable, key=f"{widget_scope}_area_link")
 age_col = st.selectbox("Age column", [""] + patient_headers, index=(patient_headers.index(default_age) + 1) if default_age in patient_headers else 0, disabled=not editable, key=f"{widget_scope}_age")
 sex_col = st.selectbox("Sex column", [""] + patient_headers, index=(patient_headers.index(default_sex) + 1) if default_sex in patient_headers else 0, disabled=not editable, key=f"{widget_scope}_sex")
-los_col = st.selectbox("Length of stay column", [""] + patient_headers, index=(patient_headers.index(default_los) + 1) if default_los in patient_headers else 0, disabled=not editable, key=f"{widget_scope}_los")
 sex_series = pd.Series(dtype=str)
 if sex_col:
-    if patient_source_mode == "Upload data" and patient_file:
+    if patient_file:
         sex_series = get_series_from_uploaded(patient_file, sex_col)
-    elif patient_source_mode == "Use data from another config" and patient_source_path:
-        sex_series = get_series_from_path(patient_source_path, sex_col)
     elif mode == "Use current config" and active_payload.get("patient_data_file"):
         sex_series = get_series_from_path(from_repo_path(active_payload["patient_data_file"]), sex_col)
 auto_sex_male, auto_sex_female = detect_sex_pair(sex_series)
 sex_male = active_payload.get("sex_male_value", auto_sex_male)
 sex_female = active_payload.get("sex_female_value", auto_sex_female)
 
+st.divider()
 st.subheader("Outcomes")
 default_binary = active_payload.get("binary_outcomes", [])
 default_numeric = active_payload.get("numeric_outcomes", [])
@@ -575,10 +528,8 @@ if binary_labels:
     b_item["raw_column"] = c2.selectbox("Raw column", [""] + headers, index=(headers.index(b_item.get("raw_column", "")) + 1) if b_item.get("raw_column", "") in headers else 0, key=f"{widget_scope}_bin_raw_{b_idx}", disabled=not editable)
     binary_series = pd.Series(dtype=str)
     if b_item.get("raw_column"):
-        if patient_source_mode == "Upload data" and patient_file:
+        if patient_file:
             binary_series = get_series_from_uploaded(patient_file, b_item["raw_column"])
-        elif patient_source_mode == "Use data from another config" and patient_source_path:
-            binary_series = get_series_from_path(patient_source_path, b_item["raw_column"])
         elif mode == "Use current config" and active_payload.get("patient_data_file"):
             binary_series = get_series_from_path(from_repo_path(active_payload["patient_data_file"]), b_item["raw_column"])
     auto_affirm, auto_negative = detect_binary_pair(binary_series)
@@ -611,7 +562,6 @@ if binary_labels:
 else:
     st.caption("No binary outcomes yet.")
 
-st.divider()
 st.markdown("**Numeric outcomes**")
 numeric_labels = [outcome_label(item, f"Outcome {i + 1}", False) for i, item in enumerate(st.session_state.numeric_outcomes)]
 if numeric_labels:
@@ -624,6 +574,7 @@ if numeric_labels:
 else:
     st.caption("No numeric outcomes yet.")
 
+st.divider()
 st.subheader("PCCF source")
 pccf_source_mode = st.radio(
     "PCCF source",
@@ -673,22 +624,26 @@ if mode == "Use current config" and selected_config:
         key="save_mode",
         horizontal=True,
     )
-    if st.session_state.save_mode == "Overwrite current config":
-        preview_path = selected_config
-    else:
-        preview_path = next_available_config_path(dataset_name or selected_config.stem)
-    st.caption(f"Will be saved as `{preview_path.name}`")
-else:
-    preview_path = next_available_config_path(dataset_name)
-    st.caption(f"Will be saved as `{preview_path.name}`")
 
 binary_outcomes = [BinaryOutcome(**item) for item in st.session_state.binary_outcomes if item.get("name") and item.get("raw_column")]
 numeric_outcomes = [NumericOutcome(**item) for item in st.session_state.numeric_outcomes if item.get("name") and item.get("raw_column")]
 
-map_data_name = build_map_data_name(provinces, map_area_type)
-st.info(f"Map data folder key will be: `{map_data_name}`")
-
+st.divider()
 st.subheader("Save config")
+dataset_name = st.text_input(
+    "Config name",
+    value=st.session_state.dataset_name_input if st.session_state.dataset_name_input else dataset_name_default,
+    key="dataset_name_input",
+    disabled=not editable,
+)
+if mode == "Use current config" and selected_config:
+    if st.session_state.save_mode == "Overwrite current config":
+        preview_path = selected_config
+    else:
+        preview_path = next_available_config_path(dataset_name or selected_config.stem)
+else:
+    preview_path = next_available_config_path(dataset_name)
+st.caption(f"Will be saved as `{preview_path.name}`")
 save_clicked = st.button("Save config", disabled=not editable)
 if editable and save_clicked and dataset_name and area_link:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
@@ -706,13 +661,11 @@ if editable and save_clicked and dataset_name and area_link:
     else:
         config_path = next_available_config_path(dataset_name)
 
-    if patient_source_mode == "Upload data" and patient_file:
+    if patient_file:
         patient_folder, _ = config_storage_paths(config_path.stem)
         patient_dest = patient_folder / patient_file.name
         save_uploaded_file(patient_file, patient_dest)
         patient_path = patient_dest
-    elif patient_source_mode == "Use data from another config" and patient_source_path:
-        patient_path = patient_source_path
     else:
         patient_path = Path(active_payload.get("patient_data_file", ""))
 
@@ -726,6 +679,7 @@ if editable and save_clicked and dataset_name and area_link:
     else:
         pccf_path = raw_pccf_path(from_repo_path(active_payload.get("pccf_file", "")))
 
+    map_data_name = build_map_data_name(provinces, map_area_type)
     payload = {
         "dataset_name": dataset_name,
         "map_data_name": map_data_name,
@@ -738,7 +692,6 @@ if editable and save_clicked and dataset_name and area_link:
         "sex_column": sex_col or None,
         "sex_male_value": sex_male or None,
         "sex_female_value": sex_female or None,
-        "length_of_stay_column": los_col or None,
         "privacy_min_incidents": int(privacy_min_incidents),
         "binary_outcomes": [asdict(item) for item in binary_outcomes],
         "numeric_outcomes": [asdict(item) for item in numeric_outcomes],
@@ -776,28 +729,11 @@ if mode == "Use current config" and selected_config:
     else:
         st.warning("No pre-filtered census link was found in `stats links.csv`.")
 
-    st.write("Raw census download is very large and is intended for reproducibility.")
-    raw_clicked = st.button("I want to download the raw census data")
-    if raw_clicked:
-        with st.spinner("Downloading raw census data..."):
-            run_script(DATA_PROCESSING_DIR / "stats" / "download_statcan_raw.py", str(selected_config))
-        if raw_census_files_present():
-            st.success(f"Raw census data downloaded successfully. Files detected: {count_raw_census_files()}")
-        else:
-            st.error("The raw download step finished, but no raw census files were detected.")
-
-    if raw_census_files_present():
-        st.info("Raw census files are present. You can run the cleaning step separately when ready.")
-        if st.button("Run raw census cleaning workflow"):
-            with st.spinner("Running raw census cleaning workflow..."):
-                run_script(DATA_PROCESSING_DIR / "stats" / "filter_statcan_raw.py", str(selected_config))
-            st.success("Raw census cleaning completed")
-
     st.subheader("Processing")
     pccf_target = raw_pccf_path(from_repo_path(active_payload.get("pccf_file", "")))
     if pccf_target and pccf_target.name:
         pccf_weighted_target = weighted_pccf_path(pccf_target)
-        st.info(f"PCCF for selected config: `{pccf_target}`")
+        st.info(f"PCCF for selected config: `{to_repo_path(pccf_target)}`")
         if pccf_weighted_target.exists():
             st.success(f"Weighted PCCF detected: `{pccf_weighted_target.name}`")
         else:
@@ -823,6 +759,5 @@ else:
     st.warning("Create or select a config to enable processing.")
 
 st.header("3. Map")
-st.caption("This embeds the existing MapLibre web map in the Streamlit app.")
 components.iframe(MAP_APP_URL, height=900, scrolling=True)
 st.caption("If the map does not load, start the local static server from the project root with `python -m http.server 8000`.")

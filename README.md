@@ -80,10 +80,10 @@ The score logic is implemented in `data processing/build_profile.py`. Most score
   - source: `SCORESOC`
   - normalized to 0 to 100
 - `res_score`
-  - source: Prairie quintile file, `Residential instability Scores`
+  - source: provincial/Canada census reference file, `Residential instability Scores`
   - normalized to 0 to 100
 - `eco_score`
-  - source: Prairie quintile file, `Economic dependency Scores`
+  - source: provincial/Canada census reference file, `Economic dependency Scores`
   - normalized to 0 to 100
 
 ### Weighted subcomponents
@@ -174,6 +174,7 @@ One thing that could be confusing in the document is that it refers to some sour
 ## Dependencies
 
 - Python is required to run the setup and data processing scripts.
+- Third-party dependency and data-source notes are documented in [`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md).
 
 ## Installing GDAL
 

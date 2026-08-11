@@ -11,6 +11,7 @@ const STATE = {
   mapAreaType: "da",
   privacyMinIncidents: 0,
   geoColumn: "DAUID",
+  tileGeoColumn: "DAUID",
 };
 
 const BASE_SDoh_METRICS = [
@@ -31,7 +32,6 @@ const BASE_SDoh_METRICS = [
 const COLOR_RANGES = {
   sdoh: ["#f4f8fb", "#b9d2df", "#6c99b7", "#2e5c87", "#102f4d"],
   outcome: ["#fff4e5", "#f6c27a", "#ef8d4f", "#c7552f", "#7d1f13"],
-  combined: ["#f2f0ff", "#c7b8ff", "#9777ff", "#6a4bd8", "#381f82"],
 };
 
 const NO_DATA_COLOR = "#b4b8bc";
@@ -41,10 +41,23 @@ let CSV_URL = "";
 let METRICS = {
   sdoh: [...BASE_SDoh_METRICS],
   outcome: [],
-  combined: [],
 };
 
 let map = null;
+
+function resolveGeoColumn(headers) {
+  const normalized = new Map((headers || []).map((header) => [String(header).trim().toLowerCase(), String(header)]));
+  const candidates = ["DAUID", "LINK", "ID", "CSDuid", "FSA"];
+  for (const candidate of candidates) {
+    const match = normalized.get(candidate.toLowerCase());
+    if (match) return match;
+  }
+  return STATE.geoColumn || "";
+}
+
+function resolveTileGeoColumn(mapAreaType) {
+  return "DAUID";
+}
 
 function sexSuffix() {
   if (STATE.sex === "m") return "_m";
@@ -88,7 +101,6 @@ function getAllMetricKeys() {
   return new Set([
     ...METRICS.sdoh.map((m) => m.key),
     ...METRICS.outcome.map((m) => m.key),
-    ...METRICS.combined.map((m) => m.key),
     "incidents_total",
     "avg_age",
   ]);
@@ -111,7 +123,7 @@ function buildMap() {
       sources: {
         tiles: {
           type: "vector",
-          promoteId: STATE.geoColumn,
+          promoteId: STATE.tileGeoColumn || "DAUID",
           tiles: [TILE_URL],
           minzoom: 0,
           maxzoom: 14,
@@ -147,6 +159,8 @@ async function loadData() {
   const csv = await fetch(CSV_URL).then((r) => r.text());
   const parsed = Papa.parse(csv, { header: true, skipEmptyLines: true });
   logMap("CSV headers", parsed.meta?.fields || []);
+  const csvHeaders = parsed.meta?.fields || [];
+  STATE.geoColumn = resolveGeoColumn(csvHeaders);
   parsed.data.forEach((row) => {
     const geoValue = String(row[STATE.geoColumn] ?? row[STATE.geoColumn.toUpperCase()] ?? row[STATE.geoColumn.toLowerCase()] ?? "").trim();
     if (!geoValue) return;
@@ -215,7 +229,7 @@ function updateFeatureState() {
       if (Number.isFinite(value)) state[metric] = value;
     }
     state.incidents_total = Number.isFinite(Number(row.incidents_total)) ? Number(row.incidents_total) : state.incidents_total;
-    if (STATE.privacyMinIncidents > 0 && Number(row.incidents_total) < STATE.privacyMinIncidents) {
+    if (STATE.mode === "outcome" && STATE.privacyMinIncidents > 0 && Number(row.incidents_total) < STATE.privacyMinIncidents) {
       for (const metric of Object.keys(state)) {
         if (metric !== "incidents_total" && metric !== "avg_age" && !metric.endsWith("_score")) {
           delete state[metric];
@@ -330,6 +344,7 @@ async function loadCurrentConfig() {
   logMap("Selected config stem", configStem);
   STATE.mapAreaType = String(selectedConfig.map_area_type || "da").trim().toLowerCase();
   STATE.privacyMinIncidents = Number(selectedConfig.privacy_min_incidents || 0) || 0;
+  STATE.tileGeoColumn = resolveTileGeoColumn(STATE.mapAreaType);
   STATE.geoColumn = "DAUID";
   const mapDataName = selectedConfig.map_data_name || buildMapDataName(selectedConfig.provinces, selectedConfig.map_area_type);
   TILE_URL = `${new URL(`./data processing/map/map data/${mapDataName}/`, window.location.href).href}{z}/{x}/{y}.pbf`;
@@ -337,6 +352,7 @@ async function loadCurrentConfig() {
   logMap("Resolved map inputs", {
     mapAreaType: STATE.mapAreaType,
     geoColumn: STATE.geoColumn,
+    tileGeoColumn: STATE.tileGeoColumn,
     mapDataName,
     tileSourceLayer: CONFIG.tileSourceLayer,
     tileUrl: TILE_URL,
@@ -345,7 +361,6 @@ async function loadCurrentConfig() {
   METRICS = {
     sdoh: [...BASE_SDoh_METRICS],
     outcome: getOutcomeMetricsFromConfig(selectedConfig),
-    combined: [...BASE_SDoh_METRICS],
   };
   if (METRICS.outcome.length === 0) {
     METRICS.outcome = [{ key: "sdoh_total_score", label: "Combined SDOH" }];
@@ -390,15 +405,19 @@ function initMapListeners() {
 function getFeatureGeoId(properties) {
   if (!properties) return "";
   const candidates = [
-    STATE.geoColumn,
-    STATE.geoColumn.toUpperCase(),
-    STATE.geoColumn.toLowerCase(),
     "DAUID",
     "dauid",
+    "LINK",
+    "link",
+    "ID",
+    "id",
     "CSDuid",
     "csduid",
     "FSA",
     "fsa",
+    STATE.geoColumn,
+    STATE.geoColumn.toUpperCase(),
+    STATE.geoColumn.toLowerCase(),
   ];
   for (const key of candidates) {
     if (Object.prototype.hasOwnProperty.call(properties, key)) {
