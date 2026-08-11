@@ -123,7 +123,6 @@ def load_raw_records(
     patient_link: str,
     age_col: str | None,
     sex_col: str | None,
-    length_of_stay_col: str | None,
     binary_outcomes: list[dict],
     numeric_outcomes: list[dict],
 ) -> pd.DataFrame:
@@ -135,7 +134,7 @@ def load_raw_records(
         df = pd.read_csv(path, dtype=str, encoding="utf-8-sig")
 
     keep_cols = [patient_link]
-    for col in [age_col, sex_col, length_of_stay_col]:
+    for col in [age_col, sex_col]:
         if col:
             keep_cols.append(col)
     for item in binary_outcomes + numeric_outcomes:
@@ -147,8 +146,6 @@ def load_raw_records(
         df[age_col] = pd.to_numeric(df[age_col], errors="coerce")
     if sex_col and sex_col in df.columns:
         df[sex_col] = df[sex_col].astype(str).str.strip().str.upper()
-    if length_of_stay_col and length_of_stay_col in df.columns:
-        df[length_of_stay_col] = pd.to_numeric(df[length_of_stay_col], errors="coerce")
     return df
 
 
@@ -262,7 +259,6 @@ def sex_masks(series: pd.Series, cfg: dict) -> tuple[pd.Series, pd.Series]:
 def build_patient_aggregation(assigned: pd.DataFrame, cfg: dict, map_area_type: str) -> pd.DataFrame:
     age_col = cfg.get("age_column")
     sex_col = cfg.get("sex_column")
-    length_of_stay_col = cfg.get("length_of_stay_column")
     numeric_outcomes = cfg.get("numeric_outcomes", [])
     binary_outcomes = cfg.get("binary_outcomes", [])
     privacy_min_incidents = int(cfg.get("privacy_min_incidents", 0) or 0)
@@ -283,8 +279,6 @@ def build_patient_aggregation(assigned: pd.DataFrame, cfg: dict, map_area_type: 
             row["incidents_m"] = None
             row["incidents_f"] = None
         row["avg_age"] = safe_mean(g[age_col]) if age_col and age_col in g.columns else None
-        if length_of_stay_col and length_of_stay_col in g.columns:
-            row["avg_length_of_stay"] = safe_mean(g[length_of_stay_col])
 
         for outcome in binary_outcomes:
             raw_col = outcome["raw_column"]
@@ -411,6 +405,29 @@ def load_prairies_quintiles() -> pd.DataFrame:
     return df[[PCCF_DAUID_COL, "res_score", "eco_score"]]
 
 
+def prefix_match_table(table: pd.DataFrame, key_col: str, target_ids: set[str]) -> pd.DataFrame:
+    if not target_ids:
+        return table.iloc[0:0].copy()
+    working = table.copy()
+    working[key_col] = working[key_col].astype(str).str.strip()
+    matched_rows: list[pd.Series] = []
+    for target in target_ids:
+        exact = working[working[key_col] == target]
+        if not exact.empty:
+            row = exact.iloc[0].copy()
+            row[key_col] = target
+            matched_rows.append(row)
+            continue
+        prefix = working[working[key_col].str.startswith(target, na=False)]
+        if not prefix.empty:
+            row = prefix.iloc[0].copy()
+            row[key_col] = target
+            matched_rows.append(row)
+    if not matched_rows:
+        return working.iloc[0:0].copy()
+    return pd.DataFrame(matched_rows, columns=working.columns)
+
+
 def weighted_index(df: pd.DataFrame, weights: dict[str, float]) -> pd.Series:
     cols = list(weights.keys())
     existing_cols = [col for col in cols if col in df.columns]
@@ -469,8 +486,6 @@ def main() -> None:
     patient_link = config["area_link_column"]
     age_col = config.get("age_column")
     sex_col = config.get("sex_column")
-    length_of_stay_col = config.get("length_of_stay_column")
-
     print("Checking PCCF candidates:")
     print(f"  weighted: {describe_pccf_candidate(pccf_weighted_path)}")
     print(f"  raw:      {describe_pccf_candidate(pccf_raw_path)}")
@@ -480,7 +495,6 @@ def main() -> None:
         patient_link,
         age_col,
         sex_col,
-        length_of_stay_col,
         config.get("binary_outcomes", []),
         config.get("numeric_outcomes", []),
     )
@@ -534,6 +548,10 @@ def main() -> None:
         base["geo_id"] = base[geo_col].map(normalize_csd_dguid)
         sdoh_raw = load_prairies_characteristics(set(base["geo_id"].astype(str)), map_area_type)
         base = base.merge(sdoh_raw, on="geo_id", how="left")
+        equiv = prefix_match_table(load_equivalence_scores(), PCCF_DAUID_COL, set(base["geo_id"].astype(str)))
+        quint = prefix_match_table(load_prairies_quintiles(), PCCF_DAUID_COL, set(base["geo_id"].astype(str)))
+        base = base.merge(equiv, left_on="geo_id", right_on=PCCF_DAUID_COL, how="left", suffixes=("", "_equiv"))
+        base = base.merge(quint, left_on="geo_id", right_on=PCCF_DAUID_COL, how="left", suffixes=("", "_quint"))
     else:
         base["dep_mat"] = np.nan
         base["dep_soc"] = np.nan
@@ -542,12 +560,14 @@ def main() -> None:
 
     base = compute_sdoh_scores(base)
 
-    out_cols = [geo_col]
+    output_geo_col = "LINK"
+    if output_geo_col != geo_col:
+        base[output_geo_col] = base[geo_col]
+
+    out_cols = [output_geo_col]
     if "csd_name" in base.columns:
         out_cols.append("csd_name")
     out_cols += ["incidents_total", "incidents_m", "incidents_f", "avg_age"]
-    if "avg_length_of_stay" in base.columns:
-        out_cols.append("avg_length_of_stay")
     for outcome in config.get("binary_outcomes", []):
         out_cols += [f"{outcome['name']}_total", f"{outcome['name']}_m", f"{outcome['name']}_f"]
     for outcome in config.get("numeric_outcomes", []):
@@ -583,13 +603,12 @@ def main() -> None:
         "numeric_outcomes": config.get("numeric_outcomes", []),
         "privacy_min_incidents": privacy_min_incidents,
         "base_columns": {
-            "geo": geo_col,
+            "geo": output_geo_col,
             "csd_name": "csd_name" if "csd_name" in output.columns else None,
             "incidents_total": "incidents_total",
             "incidents_m": "incidents_m",
             "incidents_f": "incidents_f",
             "avg_age": "avg_age",
-            "avg_length_of_stay": "avg_length_of_stay" if "avg_length_of_stay" in output.columns else None,
         },
     }
     (MERGED_DATA_DIR / "current_output.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
