@@ -1,6 +1,6 @@
 # New Profile Builder
 
-Prototype workspace for the geography-aware burn profile pipeline.
+Prototype workspace for the geography-aware profile pipeline.
 
 ## Current structure
 
@@ -8,43 +8,71 @@ Prototype workspace for the geography-aware burn profile pipeline.
 - `data processing/` - data setup and future cleaning scripts
 - `data processing/setup_dataset.py` - interactive dataset setup script
 - `data processing/configs/` - saved config files, one per dataset
+- `test2/launch_app.py` - cross-platform launcher that starts the local map server and Streamlit
 
-## Setup flow
+## Necessary files
 
-Run the setup script to create a dataset-specific config:
+To use the app, the following inputs need to be available somewhere in the project workflow:
+
+- patient data
+- PCCF
+- map data
+
+PCCF should be obtained through your institution through your DLI access.
+
+## Starting the app
+
+1. Install Python 3.
+2. Make sure `pip` is available.
+3. Install the dependencies from `requirements.txt`.
+4. Run the launcher:
 
 ```bash
-python "data processing/setup_dataset.py"
+python "test2/launch_app.py"
 ```
 
-Or use the launcher from the repo root:
+On macOS or Linux, this may need to be:
 
 ```bash
-python run_setup.py
+python3 "test2/launch_app.py"
 ```
 
-The script will ask for:
+This starts the local map server on port `8000`, launches Streamlit, and opens the browser automatically.
 
-- dataset name
-- raw patient data file
-- area type in the data
-- area type to display on the map
-- province or provinces
-- whether PCCF conversion is available
-- area link column
-- age column
-- sex column
-- length of stay column
-- outcome columns
+## Stopping the app
 
-It then writes a JSON config into `data processing/configs/` for that dataset.
+- Press `Ctrl+C` in the terminal that started the launcher.
+- If you opened the app in a browser, you can close the tab or window, but that only closes the browser view.
+- To fully stop the local servers, you still need to stop the launcher process in the terminal.
+
+## Streamlit setup flow
+
+The current Streamlit interface asks for the following in roughly this order:
+
+1. Choose whether to use the current config or create a new config.
+2. Select the current config if one exists.
+3. Enter the name for the configuration when creating a new one.
+4. Enter the map display area or areas.
+5. Choose the map area display type:
+   - dissemination area
+   - census subdivision
+   - forward sortation area
+6. Select or upload the patient data file.
+7. Select the patient data link column.
+8. Select the age column.
+9. Select the sex column and detect male/female values.
+10. Select binary outcome columns and let the app detect affirmative/negative values where possible.
+11. Select numeric outcome columns.
+12. Set the privacy threshold for suppressing outcomes in low-count areas.
+13. Select or upload the PCCF source, or use the global PCCF if one is already available.
+14. Save the config, either overwriting the current config or saving as a new one.
 
 ## Notes
 
-- This setup step is only responsible for collecting metadata and saving config.
-- Later scripts will read that config and do the map cleaning, patient cleaning, PCCF conversion, and profile building.
-- The province list is based on Canadian provinces and territories, since the workflow is intended to stay Canada-only.
-- The current setup script also looks at `C:\Users\sawye\Downloads\map links.csv` for province/area-type map download links.
+- This setup step is responsible for collecting metadata and saving config.
+- Later scripts read that config and do map handling, patient handling, PCCF conversion, and profile building.
+- The province list is based on Canadian provinces and territories, since the workflow is Canada-only.
+- The current setup script also looks at `C:\Users\sawye\Downloads\map links.csv` for province and map download links.
 
 ## SDOH score weights
 
@@ -80,10 +108,10 @@ The score logic is implemented in `data processing/build_profile.py`. Most score
   - source: `SCORESOC`
   - normalized to 0 to 100
 - `res_score`
-  - source: provincial/Canada census reference file, `Residential instability Scores`
+  - source: census reference file, `Residential instability Scores`
   - normalized to 0 to 100
 - `eco_score`
-  - source: provincial/Canada census reference file, `Economic dependency Scores`
+  - source: census reference file, `Economic dependency Scores`
   - normalized to 0 to 100
 
 ### Weighted subcomponents
@@ -175,33 +203,3 @@ One thing that could be confusing in the document is that it refers to some sour
 
 - Python is required to run the setup and data processing scripts.
 - Third-party dependency and data-source notes are documented in [`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md).
-
-## Installing GDAL
-
-### Windows
-
-- Easiest path: install QGIS or OSGeo4W, which includes a native GDAL build and matching Python bindings.
-- If QGIS is installed, the repo can usually use the bundled Python automatically.
-- The launcher checks common Windows locations such as `C:\Program Files\QGIS 4.0.1\apps\Python312\python.exe` and OSGeo4W Python paths.
-- If you prefer the command line, keep GDAL available through the QGIS/OSGeo4W Python instead of trying to build it into the system Python.
-
-### macOS and other Unix-like systems
-
-- Install Python 3 plus GDAL with your package manager or your preferred Python distribution.
-- Common options:
-  - Homebrew on macOS
-  - `apt`/`dnf`/`pacman` on Linux
-  - `python3 -m pip install gdal` only if the native GDAL libraries are already installed
-- The launcher falls back to `python3` or `python` on Unix-like systems.
-- After install, verify imports with:
-
-```bash
-python3 -c "from osgeo import gdal; print(gdal.VersionInfo())"
-```
-
-## Launcher behavior
-
-- The launcher does not install dependencies.
-- It only finds an existing Python that can run the setup script.
-- On Windows, it prefers QGIS/OSGeo4W-style Python installs.
-- On Unix-like systems, it prefers `python3` and then `python`.
