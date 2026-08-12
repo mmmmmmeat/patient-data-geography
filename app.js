@@ -85,14 +85,22 @@ function getOutcomeMetricsFromConfig(config) {
   for (const entry of config.binary_outcomes ?? []) {
     const label = String(entry.name ?? "").trim();
     if (!label) continue;
-    metrics.push({ key: `${label}_total`, label });
+    metrics.push({ key: label, label });
   }
   for (const entry of config.numeric_outcomes ?? []) {
     const label = String(entry.name ?? "").trim();
     if (!label) continue;
-    metrics.push({ key: `${label}_total`, label });
+    metrics.push({ key: label, label });
   }
   return metrics;
+}
+
+function outcomeMetricKey(baseMetric) {
+  if (!baseMetric) return baseMetric;
+  if (baseMetric.endsWith("_total") || baseMetric.endsWith("_m") || baseMetric.endsWith("_f")) {
+    return baseMetric;
+  }
+  return `${baseMetric}${sexSuffix()}`;
 }
 
 function buildMapDataName(provinces, mapAreaType) {
@@ -101,12 +109,18 @@ function buildMapDataName(provinces, mapAreaType) {
 }
 
 function getAllMetricKeys() {
-  return new Set([
+  const keys = new Set([
     ...METRICS.sdoh.map((m) => m.key),
     ...METRICS.outcome.map((m) => m.key),
     "incidents_total",
     "avg_age",
   ]);
+  for (const outcome of METRICS.outcome) {
+    keys.add(`${outcome.key}_total`);
+    keys.add(`${outcome.key}_m`);
+    keys.add(`${outcome.key}_f`);
+  }
+  return keys;
 }
 
 function isOutcomeMetric(metric) {
@@ -177,18 +191,22 @@ function pickMetric() {
   if (!list.some((m) => m.key === STATE.metric)) {
     STATE.metric = list[0]?.key || "sdoh_total_score";
   }
+  if (STATE.mode === "outcome") {
+    STATE.metric = outcomeMetricKey(STATE.metric);
+  }
   const select = document.getElementById("metricSelect");
   select.innerHTML = list.map((m) => `<option value="${m.key}">${m.label}</option>`).join("");
-  select.value = STATE.metric;
+  select.value = STATE.mode === "outcome" ? (STATE.metric.replace(/_(?:total|m|f)$/, "") || STATE.metric) : STATE.metric;
 }
 
 function colorExpression(metric) {
   const palette = COLOR_RANGES[STATE.mode];
+  const resolvedMetric = STATE.mode === "outcome" ? outcomeMetricKey(metric) : metric;
   if (STATE.mode === "outcome" && STATE.privacyMinIncidents > 0) {
     const valuesWhenAllowed = [];
     for (const row of STATE.dataByDauid.values()) {
       if (Number(row.incidents_total) < STATE.privacyMinIncidents) continue;
-      const metricValue = Number(row[metricColumn(metric)]);
+      const metricValue = Number(row[metricColumn(resolvedMetric)]);
       if (Number.isFinite(metricValue)) valuesWhenAllowed.push(metricValue);
     }
     if (valuesWhenAllowed.length === 0) return NO_DATA_COLOR;
@@ -202,12 +220,12 @@ function colorExpression(metric) {
       NO_DATA_COLOR,
       ["!", ["boolean", ["feature-state", "has_value"], false]],
       NO_DATA_COLOR,
-      ["interpolate", ["linear"], ["coalesce", ["to-number", ["feature-state", metric]], min], ...stops.flat()],
+      ["interpolate", ["linear"], ["coalesce", ["to-number", ["feature-state", resolvedMetric]], min], ...stops.flat()],
     ];
   }
   const values = [];
   for (const row of STATE.dataByDauid.values()) {
-    const metricValue = Number(row[metricColumn(metric)]);
+    const metricValue = Number(row[metricColumn(resolvedMetric)]);
     if (Number.isFinite(metricValue)) values.push(metricValue);
   }
   if (values.length === 0) return NO_DATA_COLOR;
@@ -230,6 +248,17 @@ function updateFeatureState() {
     for (const metric of getAllMetricKeys()) {
       const value = Number(row[metricColumn(metric)]);
       if (Number.isFinite(value)) state[metric] = value;
+    }
+    for (const outcome of METRICS.outcome) {
+      const totalKey = `${outcome.key}_total`;
+      const maleKey = `${outcome.key}_m`;
+      const femaleKey = `${outcome.key}_f`;
+      const totalValue = Number(row[metricColumn(totalKey)]);
+      const maleValue = Number(row[metricColumn(maleKey)]);
+      const femaleValue = Number(row[metricColumn(femaleKey)]);
+      if (Number.isFinite(totalValue)) state[totalKey] = totalValue;
+      if (Number.isFinite(maleValue)) state[maleKey] = maleValue;
+      if (Number.isFinite(femaleValue)) state[femaleKey] = femaleValue;
     }
     state.incidents_total = Number.isFinite(Number(row.incidents_total)) ? Number(row.incidents_total) : state.incidents_total;
     if (STATE.mode === "outcome" && STATE.privacyMinIncidents > 0 && Number(row.incidents_total) < STATE.privacyMinIncidents) {
@@ -334,6 +363,9 @@ function setSex(sex) {
   updateFeatureState();
   updateMapPaint();
   updateLegend();
+  if (STATE.mode === "outcome" && STATE.metric) {
+    STATE.metric = outcomeMetricKey(STATE.metric);
+  }
   if (STATE.selected) setSelected(STATE.selected);
 }
 
