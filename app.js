@@ -56,6 +56,9 @@ function resolveGeoColumn(headers) {
 }
 
 function resolveTileGeoColumn(mapAreaType) {
+  const normalized = String(mapAreaType || "").trim().toLowerCase();
+  if (normalized === "csd") return "CSDUID";
+  if (normalized === "fsa") return "CFSAUID";
   return "DAUID";
 }
 
@@ -407,12 +410,14 @@ function getFeatureGeoId(properties) {
   const candidates = [
     "DAUID",
     "dauid",
+    "CSDUID",
+    "csduid",
+    "CFSAUID",
+    "cfsauid",
     "LINK",
     "link",
     "ID",
     "id",
-    "CSDuid",
-    "csduid",
     "FSA",
     "fsa",
     STATE.geoColumn,
