@@ -19,6 +19,7 @@ CURRENT_CONFIG_FILE = CONFIG_DIR / "current_config.json"
 MERGED_DATA_DIR = DATA_PROCESSING_DIR / "map" / "merged data"
 FILTERED_CENSUS_PATH = DATA_PROCESSING_DIR / "stats" / "statcan" / "filtered" / "DA_filtered.csv"
 CSD_FILTERED_CENSUS_PATH = DATA_PROCESSING_DIR / "stats" / "statcan" / "filtered" / "CSD_filtered.csv"
+FSA_FILTERED_CENSUS_PATH = DATA_PROCESSING_DIR / "stats" / "statcan" / "filtered" / "FSA_filtered.csv"
 
 PCCF_POSTAL_COL = "POSTAL"
 PCCF_DAUID_COL = "DAUID"
@@ -325,7 +326,12 @@ def normalize_csd_dguid(value: object) -> str:
 
 
 def load_prairies_characteristics(geo_ids: set[str], map_area_type: str) -> pd.DataFrame:
-    census_path = CSD_FILTERED_CENSUS_PATH if map_area_type == "csd" else FILTERED_CENSUS_PATH
+    if map_area_type == "csd":
+        census_path = CSD_FILTERED_CENSUS_PATH
+    elif map_area_type == "fsa":
+        census_path = FSA_FILTERED_CENSUS_PATH
+    else:
+        census_path = FILTERED_CENSUS_PATH
     if not census_path.exists():
         raise FileNotFoundError(f"Missing filtered census file: {census_path}")
     wide: dict[str, dict[str, float]] = defaultdict(dict)
@@ -552,6 +558,13 @@ def main() -> None:
         quint = prefix_match_table(load_prairies_quintiles(), PCCF_DAUID_COL, set(base["geo_id"].astype(str)))
         base = base.merge(equiv, left_on="geo_id", right_on=PCCF_DAUID_COL, how="left", suffixes=("", "_equiv"))
         base = base.merge(quint, left_on="geo_id", right_on=PCCF_DAUID_COL, how="left", suffixes=("", "_quint"))
+    elif map_area_type == "fsa":
+        sdoh_raw = load_prairies_characteristics(set(base[geo_col].astype(str)), map_area_type)
+        base = base.merge(sdoh_raw, left_on=geo_col, right_on="geo_id", how="left")
+        base["dep_mat"] = np.nan
+        base["dep_soc"] = np.nan
+        base["res_score"] = np.nan
+        base["eco_score"] = np.nan
     else:
         base["dep_mat"] = np.nan
         base["dep_soc"] = np.nan
