@@ -12,7 +12,7 @@ PCCF should be obtained through your institution through your DLI access.
 ## Setup Instructions
 
 1. Ensure you have Python installed with `pip`. If you don't, or aren't sure, see the Python setup section.
-2. If you want to create maps, you need to install QGIS. It is free: [https://qgis.org/download/](https://qgis.org/download/)
+2. To create maps, you need to install QGIS. It is free: [https://qgis.org/download/](https://qgis.org/download/)
 3. Download a ZIP file of this repository. Go to the `Code` tab at the top of the page, then click the green `Code` button. Then click `Download ZIP`.
 4. Put the downloaded ZIP file somewhere on your computer, then unzip it.
 5. Open a PowerShell window on Windows or a terminal on macOS, then change directory to the unzipped repository.
