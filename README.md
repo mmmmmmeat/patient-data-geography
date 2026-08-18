@@ -12,7 +12,7 @@ PCCF should be obtained through your institution through your DLI access.
 ## Setup Instructions
 
 1. Ensure you have Python installed with `pip`. If you don't, or aren't sure, see the Python setup section.
-2. To create maps, you need to install QGIS. It is free: [https://qgis.org/download/](https://qgis.org/download/)
+2. If you want to create maps, you need to install QGIS. It is free: [https://qgis.org/download/](https://qgis.org/download/)
 3. Download a ZIP file of this repository. Go to the `Code` tab at the top of the page, then click the green `Code` button. Then click `Download ZIP`.
 4. Put the downloaded ZIP file somewhere on your computer, then unzip it.
 5. Open a PowerShell window on Windows or a terminal on macOS, then change directory to the unzipped repository.
@@ -46,6 +46,72 @@ This starts the local map server on port `8000`, launches Streamlit, and opens t
 - Press `Ctrl+C` in the terminal that started the launcher.
 - If you opened the app in a browser, you can close the tab or window, but that only closes the browser view.
 - To fully stop the local servers, you still need to stop the launcher process in the terminal.
+
+## Python setup
+
+### Windows
+
+1. Open PowerShell and run:
+
+```powershell
+python -V
+```
+
+2. If that does not work, try:
+
+```powershell
+py -V
+```
+
+3. If one of those commands shows a version, Python is installed.
+4. If neither works, install Python from [https://www.python.org/downloads/](https://www.python.org/downloads/)
+5. After installation, check `pip` with:
+
+```powershell
+pip -V
+```
+
+6. If `pip` is not available, try:
+
+```powershell
+python -m pip -V
+```
+
+7. If `pip` still is not available, run:
+
+```powershell
+curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py
+python -m get-pip.py
+```
+
+### Mac
+
+1. Open Terminal and run:
+
+```bash
+python3 -V
+```
+
+2. If that shows a version, Python is installed.
+3. If not, install Python from [https://www.python.org/downloads/](https://www.python.org/downloads/)
+4. Check `pip` with:
+
+```bash
+pip -V
+```
+
+5. If that does not work, try:
+
+```bash
+python3 -m pip -V
+```
+
+6. If `pip` still is not available, run:
+
+```bash
+curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py
+python3 -m get-pip.py
+```
 
 ## SDOH score weights
 
