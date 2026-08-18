@@ -32,6 +32,11 @@ MAP_APP_URL = "http://localhost:8000/index.html"
 
 PROVINCES = ["AB", "BC", "MB", "NB", "NL", "NS", "NT", "NU", "ON", "PE", "QC", "SK", "YT"]
 AREA_TYPES = ["da", "csd", "fsa"]
+AREA_TYPE_LABELS = {
+    "da": "DA (High granularity - areas based on population, featuring similar population for each)",
+    "csd": "CSD (Lower granularity - areas based on municipal borders)",
+    "fsa": "FSA (Balanced granularity - smaller divisions in certain high population areas, between DA and CSD)",
+}
 
 
 @dataclass
@@ -456,7 +461,13 @@ map_area_default = active_payload.get("map_area_type", "da")
 dataset_name_default = active_payload.get("dataset_name", "")
 privacy_default = int(active_payload.get("privacy_min_incidents", 6) or 0)
 provinces = st.multiselect("Province(s)", PROVINCES, default=provinces_default, disabled=not editable)
-map_area_type = st.selectbox("Map area type", AREA_TYPES, index=AREA_TYPES.index(map_area_default) if map_area_default in AREA_TYPES else 0, disabled=not editable)
+map_area_type = st.selectbox(
+    "Map area type",
+    AREA_TYPES,
+    index=AREA_TYPES.index(map_area_default) if map_area_default in AREA_TYPES else 0,
+    format_func=lambda value: AREA_TYPE_LABELS.get(value, value.upper()),
+    disabled=not editable,
+)
 if mode == "Use current config" and selected_config:
     if not st.session_state.dataset_name_input:
         st.session_state.pending_dataset_name_input = selected_config.stem
@@ -755,6 +766,14 @@ if mode == "Use current config" and selected_config:
             st.success("Profile build done")
         except subprocess.CalledProcessError as exc:
             st.error(f"Profile build failed: {exc}")
+    map_data_name = active_payload.get("map_data_name") or build_map_data_name(active_payload.get("provinces", []), active_payload.get("map_area_type", "da"))
+    if st.button("Build map"):
+        try:
+            with st.spinner("Building map data..."):
+                run_script(DATA_PROCESSING_DIR / "map" / "canada_map_processor.py", map_data_name)
+            st.success(f"Map build done for `{map_data_name}`")
+        except subprocess.CalledProcessError as exc:
+            st.error(f"Map build failed: {exc}")
 else:
     st.warning("Create or select a config to enable processing.")
 

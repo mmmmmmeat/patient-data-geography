@@ -45,6 +45,15 @@ let METRICS = {
 
 let map = null;
 
+function normalizeGeoId(value) {
+  let text = String(value ?? "").trim();
+  if (!text) return "";
+  if (text.endsWith(".0")) {
+    text = text.slice(0, -2);
+  }
+  return text;
+}
+
 function resolveGeoColumn(headers) {
   const normalized = new Map((headers || []).map((header) => [String(header).trim().toLowerCase(), String(header)]));
   const candidates = ["DAUID", "LINK", "ID", "CSDuid", "FSA"];
@@ -132,6 +141,17 @@ function logMap(msg, extra) {
   else console.log(`[map] ${msg}`);
 }
 
+function scheduleMapResize() {
+  if (!map) return;
+  requestAnimationFrame(() => {
+    try {
+      map.resize();
+    } catch (err) {
+      logMap("resize error", err?.message || err);
+    }
+  });
+}
+
 function buildMap() {
   map = new maplibregl.Map({
     container: "map",
@@ -170,6 +190,7 @@ function buildMap() {
   });
 
   map.addControl(new maplibregl.NavigationControl(), "top-right");
+  window.addEventListener("resize", scheduleMapResize);
 }
 
 async function loadData() {
@@ -179,7 +200,9 @@ async function loadData() {
   const csvHeaders = parsed.meta?.fields || [];
   STATE.geoColumn = resolveGeoColumn(csvHeaders);
   parsed.data.forEach((row) => {
-    const geoValue = String(row[STATE.geoColumn] ?? row[STATE.geoColumn.toUpperCase()] ?? row[STATE.geoColumn.toLowerCase()] ?? "").trim();
+    const geoValue = normalizeGeoId(
+      row[STATE.geoColumn] ?? row[STATE.geoColumn.toUpperCase()] ?? row[STATE.geoColumn.toLowerCase()]
+    );
     if (!geoValue) return;
     STATE.dataByDauid.set(geoValue, row);
   });
@@ -266,10 +289,10 @@ function updateFeatureState() {
         if (metric !== "incidents_total" && metric !== "avg_age" && !metric.endsWith("_score")) {
           delete state[metric];
         }
-      }
+    }
     }
     state.has_value = Object.keys(state).length > 0;
-    map.setFeatureState({ source: "tiles", sourceLayer: CONFIG.tileSourceLayer, id: dauid }, state);
+    map.setFeatureState({ source: "tiles", sourceLayer: CONFIG.tileSourceLayer, id: normalizeGeoId(dauid) }, state);
   }
 }
 
@@ -282,7 +305,7 @@ function updateMapPaint() {
 function updateLegend() {
   const metric = STATE.metric;
   const title = METRICS[STATE.mode].find((m) => m.key === metric)?.label ?? metric;
-  document.getElementById("legend").innerHTML = `<strong>${title}</strong><br/>Low <span style="opacity:.7">-&gt;</span> High`;
+  document.getElementById("legend").innerHTML = `<strong>${title}</strong><br/>Low risk (light) <span style="opacity:.7">-&gt;</span> High risk (dark)`;
 }
 
 function formatValue(value) {
@@ -292,9 +315,10 @@ function formatValue(value) {
 }
 
 function setSelected(dauid) {
-  STATE.selected = dauid;
-  const row = STATE.dataByDauid.get(String(dauid)) || {};
-  document.getElementById("daid").textContent = dauid ?? "-";
+  const normalizedDauid = normalizeGeoId(dauid);
+  STATE.selected = normalizedDauid;
+  const row = STATE.dataByDauid.get(normalizedDauid) || {};
+  document.getElementById("daid").textContent = normalizedDauid || "-";
   const csdWrap = document.getElementById("csdNameWrap");
   const csdValue = document.getElementById("csdName");
   if (STATE.mapAreaType === "fsa") {
@@ -316,7 +340,7 @@ function setSelected(dauid) {
     ? `${incidentsValue} (suppressed)`
     : incidentsValue;
   document.getElementById("avgAge").textContent = formatValue(row.avg_age);
-  document.getElementById("featureId").textContent = dauid ?? "-";
+  document.getElementById("featureId").textContent = normalizedDauid || "-";
 
   const items = [
     ["SDOH", formatValue(row.sdoh_total_score)],
@@ -458,7 +482,7 @@ function getFeatureGeoId(properties) {
   ];
   for (const key of candidates) {
     if (Object.prototype.hasOwnProperty.call(properties, key)) {
-      const value = String(properties[key] ?? "").trim();
+      const value = normalizeGeoId(properties[key]);
       if (value) return value;
     }
   }
@@ -479,6 +503,7 @@ async function main() {
     updateFeatureState();
     updateLegend();
     initMapListeners();
+    scheduleMapResize();
   });
 }
 

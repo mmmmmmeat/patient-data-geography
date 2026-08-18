@@ -2,30 +2,22 @@
 
 Prototype workspace for the geography-aware profile pipeline.
 
-## Current structure
-
-- `app.js`, `index.html`, `styles.css`, `config.js` - current web app
-- `data processing/` - data setup and future cleaning scripts
-- `data processing/setup_dataset.py` - interactive dataset setup script
-- `data processing/configs/` - saved config files, one per dataset
-- `test2/launch_app.py` - cross-platform launcher that starts the local map server and Streamlit
-
 ## Necessary files
-
-To use the app, the following inputs need to be available somewhere in the project workflow:
 
 - patient data
 - PCCF
-- map data
 
 PCCF should be obtained through your institution through your DLI access.
 
-## Starting the app
+## Setup Instructions
 
-1. Install Python 3.
-2. Make sure `pip` is available.
-3. Install the dependencies from `requirements.txt`.
-4. Run the launcher:
+1. Ensure you have Python installed with `pip`. If you don't, or aren't sure, see the Python setup section.
+2. If you want to create maps, you need to install QGIS. It is free: [https://qgis.org/download/](https://qgis.org/download/)
+3. Download a ZIP file of this repository. Go to the `Code` tab at the top of the page, then click the green `Code` button. Then click `Download ZIP`.
+4. Put the downloaded ZIP file somewhere on your computer, then unzip it.
+5. Open a PowerShell window on Windows or a terminal on macOS, then change directory to the unzipped repository.
+6. Run `pip install -r requirements.txt`.
+7. Once that is complete, run the app:
 
 ```bash
 python "test2/launch_app.py"
@@ -39,40 +31,21 @@ python3 "test2/launch_app.py"
 
 This starts the local map server on port `8000`, launches Streamlit, and opens the browser automatically.
 
+8. The app window should open automatically. If it does not, paste `http://localhost:8501` into a browser address bar.
+9. Enter the prompted fields in the app. The province selector will only work for provinces you have a PCCF for.
+10. There are 2 upload sections: one for your patient data and one for your PCCF. Drop each into their respective upload boxes. Use the `Use global PCCF` option if you want to avoid uploading the PCCF multiple times.
+11. Enter a name for your configuration. It can be saved and selected later if you create different maps.
+12. Save your config.
+13. In the processing section, there are 2 buttons you only need to click once: `Download pre-filtered census data` and `Build weighted PCCF`. Click them in that order.
+14. For each new config you will need to build a profile. Click the `Build profile` button.
+15. For each new map type you will need to build the map. Click the `Build map` button. This may take a while. If you build the map for Ontario DA-level data, for example, you do not need to build it again for another Ontario DA-level map.
+16. The map will now be displayed at the bottom of the page. You may need to reload the page for it to show. Hover over areas to show statistics, and use the metrics section to switch the data displayed.
+
 ## Stopping the app
 
 - Press `Ctrl+C` in the terminal that started the launcher.
 - If you opened the app in a browser, you can close the tab or window, but that only closes the browser view.
 - To fully stop the local servers, you still need to stop the launcher process in the terminal.
-
-## Streamlit setup flow
-
-The current Streamlit interface asks for the following in roughly this order:
-
-1. Choose whether to use the current config or create a new config.
-2. Select the current config if one exists.
-3. Enter the name for the configuration when creating a new one.
-4. Enter the map display area or areas.
-5. Choose the map area display type:
-   - dissemination area
-   - census subdivision
-   - forward sortation area
-6. Select or upload the patient data file.
-7. Select the patient data link column.
-8. Select the age column.
-9. Select the sex column and detect male/female values.
-10. Select binary outcome columns and let the app detect affirmative/negative values where possible.
-11. Select numeric outcome columns.
-12. Set the privacy threshold for suppressing outcomes in low-count areas.
-13. Select or upload the PCCF source, or use the global PCCF if one is already available.
-14. Save the config, either overwriting the current config or saving as a new one.
-
-## Notes
-
-- This setup step is responsible for collecting metadata and saving config.
-- Later scripts read that config and do map handling, patient handling, PCCF conversion, and profile building.
-- The province list is based on Canadian provinces and territories, since the workflow is Canada-only.
-- The current setup script also looks at `C:\Users\sawye\Downloads\map links.csv` for province and map download links.
 
 ## SDOH score weights
 
@@ -162,7 +135,7 @@ There are no additional custom weights inside this group.
 - `car_commute_score`
 - `commute_time_score`
 
-`commute_time_score` comes from a weighted index of commute-time categories:
+`commute_time_score` comes from a weighted index of commute-time categories and is inverted so longer commute times map to higher risk:
 
 - `2612_rate` = weight `1`
 - `2613_rate` = weight `2`
@@ -172,7 +145,7 @@ There are no additional custom weights inside this group.
 
 #### Final combined SDOH score
 
-`sdoh_total_score` is the simple mean of the component scores:
+`sdoh_total_score` is a weighted average of the component scores:
 
 - `income_score`
 - `housing_score`
@@ -180,26 +153,16 @@ There are no additional custom weights inside this group.
 - `employment_score`
 - `family_score`
 - `generation_score`
-- `commute_score`
+- `commute_score` with reduced weight
 - `dep_mat`
 - `dep_soc`
 - `res_score`
 - `eco_score`
 
-It is not a weighted average.
-
-### Notes on the attached weights document
-
-The attached `Score weights.docx` matched the current code for the following items:
-
-- housing build-year weights
-- generation weights
-- commute-time weights
-- the fact that `sdoh_total_score` is a simple mean
-
-One thing that could be confusing in the document is that it refers to some source fields by their derived score names rather than the exact intermediate column names in the code. The underlying weights themselves match the script.
+The commuting component is intentionally given less influence than the other major score groups.
 
 ## Dependencies
 
-- Python is required to run the setup and data processing scripts.
+- Python (and pip) is required to run the setup and data processing scripts.
+- QGIS is required for creating maps.
 - Third-party dependency and data-source notes are documented in [`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md).

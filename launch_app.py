@@ -20,8 +20,16 @@ def find_python_command() -> list[str]:
     return [sys.executable]
 
 
+class NoCacheHTTPRequestHandler(SimpleHTTPRequestHandler):
+    def end_headers(self) -> None:
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Expires", "0")
+        super().end_headers()
+
+
 def start_static_server() -> ThreadingHTTPServer:
-    handler = partial(SimpleHTTPRequestHandler, directory=str(ROOT))
+    handler = partial(NoCacheHTTPRequestHandler, directory=str(ROOT))
     server = ThreadingHTTPServer(("127.0.0.1", MAP_PORT), handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
