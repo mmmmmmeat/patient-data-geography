@@ -1,6 +1,4 @@
-# New Profile Builder
-
-Prototype workspace for the geography-aware profile pipeline.
+# Patient Data Geographical Representation Tool
 
 ## Necessary files
 
