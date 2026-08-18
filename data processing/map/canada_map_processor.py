@@ -122,16 +122,31 @@ def find_qgis_batch() -> Path:
     for candidate in candidates:
         if candidate.exists():
             return candidate
+
+    if sys.platform == "darwin":
+        mac_roots = []
+        for root in (Path("/Applications"), Path.home() / "Applications"):
+            if root.exists():
+                mac_roots.extend(sorted(root.glob("QGIS*.app")))
+
+        for app in mac_roots:
+            for candidate in app.rglob("qgis_process"):
+                if candidate.is_file() and os.access(candidate, os.X_OK):
+                    return candidate
+
     raise FileNotFoundError(
         "Could not find a QGIS process executable. Set QGIS_PROCESS_PATH to qgis_process-qgis.bat or qgis_process.exe, "
-        "or install QGIS in a standard Program Files location."
+        "or install QGIS in a standard location."
     )
 
 
 def run_qgis_process(batch: Path, algorithm: str, params: dict, cwd: Path) -> None:
     payload = {"inputs": params}
+    command = [str(batch), "run", algorithm, "-", "--json"]
+    if batch.suffix.lower() == ".bat":
+        command = [str(batch), "run", algorithm, "-", "--json"]
     proc = subprocess.run(
-        [str(batch), "run", algorithm, "-", "--json"],
+        command,
         input=json.dumps(payload),
         text=True,
         capture_output=True,
