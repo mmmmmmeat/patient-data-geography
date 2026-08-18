@@ -468,11 +468,29 @@ def compute_sdoh_scores(df: pd.DataFrame) -> pd.DataFrame:
     out["generation_score"] = normalize_to_100(out["generation_index"])
     out["car_commute_score"] = normalize_to_100(out["car_commute_rate"], invert=True) if "car_commute_rate" in out.columns else np.nan
     out["commute_time_index"] = weighted_index(out, commute_weights)
-    out["commute_time_score"] = normalize_to_100(out["commute_time_index"])
+    out["commute_time_score"] = normalize_to_100(out["commute_time_index"], invert=True)
     commute_parts = [col for col in ["car_commute_score", "commute_time_score"] if col in out.columns]
     out["commute_score"] = out[commute_parts].mean(axis=1) if commute_parts else np.nan
-    score_cols = [col for col in ["income_score", "housing_score", "education_score", "employment_score", "family_score", "generation_score", "commute_score", "dep_mat", "dep_soc", "res_score", "eco_score"] if col in out.columns]
-    out["sdoh_total_score"] = out[score_cols].mean(axis=1) if score_cols else np.nan
+    weighted_scores = {
+        "income_score": 1.0,
+        "housing_score": 1.0,
+        "education_score": 1.0,
+        "employment_score": 1.0,
+        "family_score": 1.0,
+        "generation_score": 1.0,
+        "commute_score": 0.5,
+        "dep_mat": 1.0,
+        "dep_soc": 1.0,
+        "res_score": 1.0,
+        "eco_score": 1.0,
+    }
+    score_cols = [col for col in weighted_scores if col in out.columns]
+    if score_cols:
+        weights = np.array([weighted_scores[col] for col in score_cols], dtype=float)
+        values = out[score_cols].astype(float)
+        out["sdoh_total_score"] = values.mul(weights, axis=1).sum(axis=1) / weights.sum()
+    else:
+        out["sdoh_total_score"] = np.nan
     return out
 
 
