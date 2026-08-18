@@ -97,21 +97,35 @@ def read_download_urls(links_csv: Path) -> dict[str, str]:
 
 
 def find_qgis_batch() -> Path:
-    qgis_root = os.environ.get("QGIS_ROOT")
-    candidates = []
-    if qgis_root:
-        candidates.append(Path(qgis_root) / "bin" / "qgis_process-qgis.bat")
+    env_candidates = [
+        os.environ.get("QGIS_PROCESS_PATH"),
+        os.environ.get("QGIS_ROOT"),
+    ]
 
-    candidates.extend(
-        [
-            Path(r"C:\Program Files\QGIS 4.0.1\bin\qgis_process-qgis.bat"),
-            Path(r"C:\Program Files (x86)\QGIS 4.0.1\bin\qgis_process-qgis.bat"),
-        ]
-    )
+    candidates: list[Path] = []
+    for env_value in env_candidates:
+        if not env_value:
+            continue
+        env_path = Path(env_value)
+        if env_path.is_file():
+            candidates.append(env_path)
+        else:
+            candidates.append(env_path / "bin" / "qgis_process-qgis.bat")
+            candidates.append(env_path / "bin" / "qgis_process.exe")
+
+    for root in (Path(r"C:\Program Files"), Path(r"C:\Program Files (x86)")):
+        if not root.exists():
+            continue
+        for pattern in ("QGIS*\\bin\\qgis_process-qgis.bat", "QGIS*\\bin\\qgis_process.exe"):
+            candidates.extend(root.glob(pattern))
+
     for candidate in candidates:
         if candidate.exists():
             return candidate
-    raise FileNotFoundError("Could not find qgis_process-qgis.bat under the QGIS install.")
+    raise FileNotFoundError(
+        "Could not find a QGIS process executable. Set QGIS_PROCESS_PATH to qgis_process-qgis.bat or qgis_process.exe, "
+        "or install QGIS in a standard Program Files location."
+    )
 
 
 def run_qgis_process(batch: Path, algorithm: str, params: dict, cwd: Path) -> None:
